@@ -1,0 +1,39 @@
+{
+  "name": "airbag-pwa",
+  "version": "0.1.0",
+  "description": "AIRBAG PWA — členská aplikace pro dopadovou matraci Tělovýchovná jednota Krupka (registrace, e-souhlas, platba test mode, QR členská karta)",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "seed": "node src/seed.js",
+    "icons": "node scripts/gen-icons.js",
+    "test": "node tests/api.test.js",
+    "reset": "rm -f data/airbag.db* && npm run seed",
+    "mobile:copy": "node scripts/build-www.js",
+    "mobile:sync": "npm run mobile:copy && cap sync",
+    "mobile:android": "npm run mobile:sync && cap open android",
+    "mobile:ios": "npm run mobile:sync && cap open ios"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/ios": "^8.5.1",
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "nodemailer": "^9.0.5",
+    "pg": "^8.13.0",
+    "qrcode": "^1.5.4",
+    "stripe": "^22.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.1"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.10.0"
+  }
+}

@@ -1,0 +1,12 @@
+.env
+.git
+.gitignore
+node_modules
+data
+*.log
+.DS_Store
+.ssm
+.npm-cache-tmp
+scripts
+tests
+TJK-Krupka-app*

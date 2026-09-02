@@ -1,0 +1,17 @@
+node_modules/
+data/
+*.log
+.DS_Store
+.env
+.vercel
+
+# Capacitor / nativní buildy (regenerují se: npm run mobile:sync)
+www/
+.npm-cache/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/public/
+ios/App/App/Pods/
+ios/App/App/build/
+ios/App/App/public/

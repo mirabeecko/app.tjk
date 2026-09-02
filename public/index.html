@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Tělovýchovná jednota Krupka — Členská aplikace</title>
+  <meta name="description" content="Členská aplikace Tělovýchovná jednota Krupka: roční členství i jednorázové vstupy na airbag, registrace, souhlasy, QR karta." />
+  <meta name="theme-color" content="#070B14" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icons/icon-192.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css?v=26" />
+</head>
+<body>
+  <div id="app">
+    <!-- DESKTOP RAIL: značka + vertikální navigace -->
+    <aside class="rail">
+      <a href="#/" class="brand rail-brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong>TJ Krupka</strong>
+          <small>členská aplikace</small>
+        </span>
+      </a>
+      <nav class="topnav rail-nav" id="topnav" aria-label="Hlavní navigace"></nav>
+      <div class="rail-note">
+        <span class="rail-dot" aria-hidden="true"></span>
+        <span>Zařízení: dopadová matrace (airbag)</span>
+      </div>
+    </aside>
+
+    <!-- HLAVNÍ SLOUPEC -->
+    <div class="main-col">
+      <header class="topbar">
+        <button id="menu-btn" class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+          <span></span><span></span><span></span>
+        </button>
+        <a href="#/" class="brand top-brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-text">
+            <strong>TJ Krupka</strong>
+            <small>členská aplikace</small>
+          </span>
+        </a>
+        <button id="more-btn" class="more-btn" aria-label="Více" aria-expanded="false" aria-controls="mobile-menu">
+          <span></span><span></span><span></span>
+        </button>
+        <nav id="mobile-menu" class="mobile-menu" hidden></nav>
+      </header>
+
+      <main id="view" class="view" role="main"></main>
+    </div>
+
+    <footer class="app-footer">
+      <nav class="footer-nav">
+        <a href="#/pravidla">Pravidla provozu</a>
+        <a href="#/podminky">Provozní řád</a>
+      </nav>
+      <span>Tělovýchovná jednota Krupka, z.s. · Krupka</span>
+    </footer>
+  </div>
+
+  <nav class="bottomnav" id="bottomnav" hidden></nav>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/views-public.js"></script>
+  <script src="/js/views-member.js"></script>
+  <script src="/js/views-admin.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
