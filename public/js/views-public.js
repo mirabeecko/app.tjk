@@ -39,15 +39,15 @@ async function viewLanding() {
       el('div', { class: 'hero-inner' }, [
         el('span', { class: 'pill', text: 'Tělovýchovná jednota Krupka z.s.' }),
         el('h1', { text: 'Airbag. Skoky. Tvoje volba.' }),
-        el('p', { class: 'lead', text: 'Dopadová matrace pro trénink MTB skoků. Vyberte si: roční členství s výhodami, nebo jednorázový vstup — v obou případech stačí registrace, souhlasy a platba.' }),
+        el('p', { class: 'lead', text: 'Dopadová matrace pro trénink MTB skoků. Staňte se členem TJK a užívejte členské výhody, nebo si kupte jednorázový vstup — v obou případech stačí registrace, souhlasy a platba.' }),
         el('div', { class: 'hero-cta' }, [
-          el('button', { class: 'btn btn-lg', onclick: () => intentStart('clenstvi') }, [ico('shield', 17), ' ', 'Roční členství']),
+          el('button', { class: 'btn btn-lg', onclick: () => intentStart('clenstvi') }, [ico('shield', 17), ' ', 'Členství']),
           el('button', { class: 'btn ghost-dark', onclick: () => intentStart('vstup') }, [ico('ticket', 17), ' ', 'Jednorázový vstup']),
           el('a', { class: 'btn ghost-dark', href: '#/prihlaseni' }, [ico('key', 17), ' ', 'Mám účet — přihlásit']),
         ]),
         el('div', { class: 'hero-stats' }, [
-          el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Roční členství' }), el('span', { class: 'hs-value' }, [el('em', { text: '200' }), ' Kč/rok'])]),
-          el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Vstup AIRBAG — den' }), el('span', { class: 'hs-value', text: '600 Kč' })]),
+          el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Členství TJK' }), el('span', { class: 'hs-value' }, [el('em', { text: '1' }), ' sleva na den'])]),
+          el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Vstup AIRBAG — den' }), el('span', { class: 'hs-value', text: 'bez členství' })]),
           el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Do QR karty' }), el('span', { class: 'hs-value' }, [el('em', { text: '4' }), ' kroky'])]),
         ]),
       ]),
@@ -62,12 +62,12 @@ async function viewLanding() {
       el('p', { class: 'muted', text: 'Obojí začíná registrací (jméno, e-mail…) a souhlasem s provozním řádem. Mladiství potřebují souhlas zákonného zástupce.' }),
       el('div', { class: 'grid-2' }, [
         el('div', { class: 'card' }, [
-          el('div', { class: 'list-row' }, [el('strong', { text: 'Roční členství' }), el('strong', { class: 'price', text: '200 Kč/rok' })]),
-          el('p', { class: 'muted small', text: 'Přístup k zařízením spolku, rezervace, slevy na jednorázové vstupy (den AIRBAG za 300 Kč), členská karta s QR. Nezletilí se souhlasem rodiče.' }),
+          el('div', { class: 'list-row' }, [el('strong', { text: 'Členství TJK' }), el('span', { class: 'pick-sub', text: 'členské výhody + sleva na den' })]),
+          el('p', { class: 'muted small', text: 'Přístup k zařízením spolku, rezervace, slevy na jednorázové vstupy, členská karta s QR. Nezletilí se souhlasem rodiče.' }),
           el('button', { class: 'btn', onclick: () => intentStart('clenstvi') }, [ico('shield', 16), ' ', 'Chci členství']),
         ]),
         el('div', { class: 'card' }, [
-          el('div', { class: 'list-row' }, [el('strong', { text: 'Jednorázový vstup — AIRBAG' }), el('strong', { class: 'price', text: '600 Kč' })]),
+          el('div', { class: 'list-row' }, [el('strong', { text: 'Jednorázový vstup — AIRBAG' }), el('span', { class: 'pick-sub', text: 'bez členství' })]),
           el('p', { class: 'muted small', text: 'Přístup k dopadové matraci bez členství. Mladiství se souhlasem zákonného zástupce. Členové TJK mají zvýhodněnou cenu.' }),
           el('button', { class: 'btn', onclick: () => intentStart('vstup') }, [ico('ticket', 16), ' ', 'Chci jednorázový vstup']),
         ]),
@@ -103,7 +103,7 @@ async function viewLanding() {
   const ageLabel = (me.ageType === 'MINOR' ? 'Mladistvý' : (me.ageType === 'ADULT' ? 'Dospělý' : 'Dospělý'));
   const accessOk = !!me.access;
   const statusLine = isMember
-    ? `Roční členství je aktivní do ${fmtDate(m.validUntil)}.`
+    ? `Členství je aktivní do ${fmtDate(m.validUntil)}.`
     : accessOk
       ? 'Máte aktivní jednorázový vstup — QR karta platí pro vstup.'
       : st === 'payment_pending' ? 'Čeká se na úhradu — dokončete platbu.'
@@ -268,10 +268,10 @@ async function viewRegister() {
   const dailyIntent = intent === 'vstup';
   const intentNote = dailyIntent
     ? 'Registrujete se pro jednorázový vstup na airbag. Po registraci udělíte souhlasy a koupíte si denní vstup (600 Kč, pro členy 300 Kč). Mladiství pokračují přes souhlas zákonného zástupce.'
-    : 'Registrujete se pro roční členství (200 Kč/rok). Po registraci udělíte souhlasy a zaplatíte členský příspěvek. Kategorie se určí sama podle data narození — nezletilí potřebují souhlas rodiče.';
+    : 'Registrujete se pro členství TJK. Po registraci udělíte souhlasy a zaplatíte členský příspěvek (200 Kč/rok). Kategorie se určí sama podle data narození — nezletilí potřebují souhlas rodiče.';
 
   const card = el('div', { class: 'auth-card' }, [
-    el('h1', { text: dailyIntent ? 'Registrace pro jednorázový vstup' : 'Registrace pro roční členství' }),
+    el('h1', { text: dailyIntent ? 'Registrace pro jednorázový vstup' : 'Registrace pro členství TJK' }),
     el('p', { class: 'muted', text: intentNote }),
   ]);
 

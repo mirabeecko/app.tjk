@@ -493,6 +493,7 @@ select {
 .list-row:last-child { border-bottom: none; }
 .list-row .l-name { font-weight: 700; font-size: 0.93rem; }
 .list-row .l-sub { font-size: 0.76rem; color: var(--text-2); }
+.list-row .pick-sub { font-size: 0.74rem; color: var(--text-2); font-weight: 600; text-align: right; }
 .empty { text-align: center; padding: 28px 10px; color: var(--text-2); font-size: 0.9rem; }
 
 /* ---------- HERO — guest (tmavý „velitelský" pruh) ---------- */

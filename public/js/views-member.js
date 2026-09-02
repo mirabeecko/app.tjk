@@ -249,7 +249,7 @@ async function viewPayment() {
     const memCard = el('div', { class: 'card primary join-card' }, [
       el('h3', { text: 'Staň se členem TJK' }),
       el('p', { class: 'muted', text: 'Členové mají zvýhodněné ceny služeb a přístup k zařízením spolku.' }),
-      el('div', { class: 'list-row' }, [el('span', { text: 'Roční členství' }), el('strong', { class: 'price', style: 'color:#fff', text: `${fmtCzk(membershipPrice)} / rok` })]),
+      el('div', { class: 'list-row' }, [el('span', { text: 'Členství TJK' }), el('strong', { class: 'price', style: 'color:#fff', text: `${fmtCzk(membershipPrice)} / rok` })]),
       el('p', { class: 'muted small', text: gatewayNote }),
       el('button', { class: 'btn accent', text: isStripe ? `Stát se členem (${fmtCzk(membershipPrice)} přes Stripe)` : `Stát se členem (${fmtCzk(membershipPrice)})` }),
     ]);
@@ -311,7 +311,7 @@ async function viewPayment() {
   const history = el('div', { class: 'card soft' }, [el('h3', { text: 'Historie plateb' })]);
   const pays = me.payments || [];
   if (!pays.length) history.append(el('div', { class: 'empty', text: 'Zatím žádné platby.' }));
-  const purposeLabel = (p) => p.purpose === 'prispevek' ? 'Roční členství'
+  const purposeLabel = (p) => p.purpose === 'prispevek' ? 'Členství TJK'
     : p.purpose === 'produkt' ? `Jednorázový vstup — ${p.productCode || ''}`.trim()
       : p.purpose === 'merch' ? 'Merch' : p.purpose;
   for (const p of pays) {
