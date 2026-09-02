@@ -15,3 +15,14 @@ android/app/src/main/assets/public/
 ios/App/App/Pods/
 ios/App/App/build/
 ios/App/App/public/
+
+# Lokální build artefakty (ne commitovat)
+build/
+dist/
+.android/
+.gradle-home/
+.ios-derived/
+.vercel-cli/
+.idea/
+*.xcuserstate
+ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
