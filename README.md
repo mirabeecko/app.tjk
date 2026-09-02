@@ -41,6 +41,26 @@ npm run reset
 
 ---
 
+## 📱 Android / iOS mobilní appka (Capacitor)
+
+Web je obalený jako **nativní appka** přes Capacitor — stejné funkce jako PWA,
+ale v instalačním balíčku pro Android/iOS. Zdrojové projekty leží v `android/`
+a `ios/`, web se buildí do `www/` (kopie `public/` + injektovaný `__API_BASE__`,
+který míří na produkční backend).
+
+```bash
+npm run mobile:android   # build www + sync + otevřít Android Studio
+npm run mobile:ios       # build www + sync + otevřít Xcode
+```
+
+- **ID appky:** `cz.tjkrupka.app` (Android `applicationId`, iOS `PRODUCT_BUNDLE_IDENTIFIER`).
+- **Backend volá:** `https://tjk-airbag.vercel.app` (změna: `scripts/build-www.js`).
+- **Build/signing** (na vašem stroji): Android → Android Studio → Generate Signed
+  Bundle; iOS → Xcode → Archive → TestFlight/App Store. Viz `DEPLOYMENT.md`.
+- **PWA** zůstává dostupná na webu (instalace na plochu přes manifest + sw).
+
+---
+
 ## Platební brána (Stripe Checkout)
 
 Platby probíhají přes **Stripe Checkout** (hostovaná platební stránka): údaje
