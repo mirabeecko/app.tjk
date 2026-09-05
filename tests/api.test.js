@@ -212,25 +212,20 @@ async function main() {
   const dozorToken = dozorMail && (dozorMail.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
   await api('POST', `/api/login/${dozorToken}`);
 
-  const admin = await api('GET', '/api/admin/members');
-  check('Dozor vidí seznam členů', admin.members.length >= 3, `${admin.members.length} členů`);
-  const adultRow = admin.members.find((m) => m.id === adultId);
-  check('Dospělý člen: consentOk + paid', adultRow && adultRow.consentOk === true && adultRow.paid === true);
+  // ✅ Bezpečnostní model: dozor NIKDY nevidí seznam všech členů — jen admin.
+  const adminForbiddenDozor = await api('GET', '/api/admin/members');
+  check('Dozor NEMÁ přístup k seznamu členů (403, jen admin)', adminForbiddenDozor.error === 'NEDOSTATECNA_PRAVA');
+  const statsForbiddenDozor = await api('GET', '/api/admin/stats');
+  check('Dozor NEMÁ přístup ke statistikám (403, jen admin)', statsForbiddenDozor.error === 'NEDOSTATECNA_PRAVA');
+  const detailForbiddenDozor = await api('GET', `/api/admin/members/${adultId}`);
+  check('Dozor NEMÁ přístup k detailu člena (403, jen admin)', detailForbiddenDozor.error === 'NEDOSTATECNA_PRAVA');
 
-  const stats = await api('GET', '/api/admin/stats');
-  check('Statistiky: 2 aktivní', stats.statuses.active >= 2, JSON.stringify(stats.statuses));
-
-  // kontrola QR karty dozorem
+  // kontrola QR karty dozorem (provozní nutnost — zůstává povolena)
   const qrCheck = await api('POST', '/api/check-card', { qrPayload: card.qrPayload });
   check('Kontrola QR: vstup povolen', qrCheck.ok === true && qrCheck.status === 'active', qrCheck.message);
 
   const badQr = await api('POST', '/api/check-card', { qrPayload: 'TJK:999:fake' });
   check('Kontrola falešné karty → zamítnuto', badQr.error === 'NEPLATNA_KARTA');
-
-  // auditní detail člena
-  const detail = await api('GET', `/api/admin/members/${adultId}`);
-  check('Detail člena: auditní stopa souhlasů s IP+UA', detail.consents.length >= 5 && detail.consents.every((c) => c.ip && c.identity));
-  check('Detail člena: platby + karta', detail.payments.length >= 1 && !!detail.card);
 
   // role guard: běžný člen nesmí do adminu
   const loginAdult = await api('POST', '/api/login', { email: reg.member.email });
@@ -294,6 +289,17 @@ async function main() {
 
   const saMembers = await api('GET', '/api/superadmin/members');
   check('Superadmin: přehled členů', saMembers.total >= 1 && saMembers.members.length >= 1, `${saMembers.total} členů`);
+
+  // Admin přehled (jen superadmin — nový bezpečnostní model)
+  const adminList = await api('GET', '/api/admin/members');
+  check('Admin (superadmin): vidí seznam členů', adminList.members && adminList.members.length >= 3, `${(adminList.members||[]).length} členů`);
+  const adultRow = adminList.members.find((m) => m.id === adultId);
+  check('Admin: dospělý člen consentOk + paid', adultRow && adultRow.consentOk === true && adultRow.paid === true);
+  const adminStats = await api('GET', '/api/admin/stats');
+  check('Admin: statistiky aktivní', adminStats.statuses && adminStats.statuses.active >= 2, JSON.stringify(adminStats.statuses||{}));
+  const adminDetail = await api('GET', `/api/admin/members/${adultId}`);
+  check('Admin: detail člena — auditní stopa souhlasů s IP+UA', adminDetail.consents.length >= 5 && adminDetail.consents.every((c) => c.ip && c.identity));
+  check('Admin: detail člena — platby + karta', adminDetail.payments.length >= 1 && !!adminDetail.card);
 
   const saTypes = await api('GET', '/api/superadmin/member-types');
   check('Superadmin: jen aktivní kategorie (3)', saTypes.types.length === 3 && saTypes.types.every((t) => ['dospele', 'mladez', 'dite'].includes(t.code)), `${saTypes.types.length} typů: ${saTypes.types.map((t) => t.code).join(',')}`);

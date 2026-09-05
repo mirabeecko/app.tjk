@@ -13,6 +13,39 @@ async function viewAdmin() {
 
   root.append(el('h1', { text: 'Správa členů' }), el('p', { class: 'muted', text: 'Přehled členů, stav souhlasů a plateb. (Dozor / výbor)' }));
 
+  // Dozor / výbor: jen kontrola QR karty — NIKDY nevidí seznam všech členů.
+  // Seznam členů mají pouze admin (superadmin) — viz '/admin/members' guard.
+  if (!isSuperAdmin()) {
+    root.append(el('div', { class: 'alert info', text: 'Přehled všech členů je dostupný pouze administrátorovi spolku. Vy zde máte kontrolu členství přes QR kartu.' }));
+    const door = el('div', { class: 'card' }, [
+      el('h3', { text: 'Kontrola členství (QR)' }),
+      el('p', { class: 'muted small', text: 'Zadejte payload QR karty (text začínající TJK:) nebo ji naskenujte.' }),
+      el('input', { type: 'text', id: 'qr-input', placeholder: 'TJK:12:abc…', class: 'mono' }),
+      el('div', { id: 'qr-result' }),
+      el('button', { class: 'btn', id: 'qr-check', text: 'Ověřit kartu' }),
+    ]);
+    root.append(door);
+    $('#qr-check').addEventListener('click', async () => {
+      const payload = $('#qr-input').value.trim();
+      if (!payload) { toast('Zadejte payload QR karty', true); return; }
+      try {
+        const r = await API.post('/check-card', { qrPayload: payload });
+        const box = $('#qr-result');
+        box.innerHTML = '';
+        box.append(el('div', { class: `alert ${r.ok ? 'ok' : 'err'}` }, [
+          el('div', {}, [el('strong', { text: r.memberName }), ` (ID ${(r.memberId || '').slice(0, 8)}…)`]),
+          el('div', { text: r.message }),
+          el('div', { class: 'small muted', text: `Platnost do ${fmtDate(r.validUntil)}` }),
+        ]));
+      } catch (err) {
+        const box = $('#qr-result');
+        box.innerHTML = '';
+        box.append(el('div', { class: 'alert err', text: err.message }));
+      }
+    });
+    return;
+  }
+
   let stats = null, members = [];
   try {
     [stats, members] = await Promise.all([API.get('/admin/stats'), API.get('/admin/members')]);
@@ -90,7 +123,7 @@ async function viewAdmin() {
 async function viewAdminDetail(memberId) {
   const root = $('#view');
   root.innerHTML = '';
-  if (!isStaff()) { root.append(el('div', { class: 'alert err', text: 'Nedostatečná práva.' })); return; }
+  if (!isSuperAdmin()) { root.append(el('div', { class: 'alert err', text: 'Nedostatečná práva — detail člena je dostupný pouze administrátorovi.' })); return; }
 
   root.append(el('h1', { text: 'Detail člena' }), el('a', { class: 'btn small ghost', href: '#/admin', text: '← Zpět na přehled' }));
 

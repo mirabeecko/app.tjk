@@ -851,7 +851,7 @@ router.post('/check-card', A.requireRole('dozor', 'vybor', 'superadmin'), asyncR
 }));
 
 // ---------- admin (dozor / výbor / superadmin) ----------
-router.get('/admin/members', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+router.get('/admin/members', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const all = await D.Members.listAll();
   const rows = [];
   for (const m of all) {
@@ -872,7 +872,7 @@ router.get('/admin/members', A.requireRole('dozor', 'vybor', 'superadmin'), asyn
   res.json({ members: rows });
 }));
 
-router.get('/admin/members/:id', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+router.get('/admin/members/:id', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const m = await D.Members.getById(req.params.id);
   if (!m) return res.status(404).json({ error: 'NENALEZENO' });
   const consents = await D.Consents.listForMember(m.id);
@@ -900,7 +900,7 @@ router.post('/admin/members/:id/status', A.requireRole('dozor', 'vybor', 'supera
   res.json({ ok: true, member: publicMember(updated), status: effectiveStatus(updated) });
 }));
 
-router.get('/admin/stats', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+router.get('/admin/stats', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const rows = await D.Members.listAll();
   const statuses = {};
   for (const m of rows) {
