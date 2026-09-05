@@ -454,12 +454,14 @@ async function viewLogin() {
   const root = $('#view');
   root.innerHTML = '';
 
-  // režim e-mailů (smtp / stub) pro správnou informaci uživateli
-  let emailMode = 'stub';
+  // Režim e-mailů (smtp / stub) — v produkci vždy smtp. Text "Testovací režim"
+  // odstraněn: běžný uživatel nesmí vidět dev-inbox hlášku. Kdyby /config selhalo,
+  // předpokládáme smtp (reálné odesílání), ne stub.
+  let emailMode = 'smtp';
   try {
     const cfg = await API.get('/config');
-    emailMode = cfg.emailMode || 'stub';
-  } catch (e) { /* offline: předpokládáme stub */ }
+    emailMode = cfg.emailMode || 'smtp';
+  } catch (e) { /* offline: předpokládáme smtp */ }
 
   const brand = el('a', { class: 'auth-brand', href: '#/' }, [
     el('span', { class: 'brand-mark', 'aria-hidden': 'true' }),
@@ -474,13 +476,6 @@ async function viewLogin() {
     el('p', { class: 'muted', text: 'Přihlaste se e-mailem — odkaz pro přihlášení vám přijde na vaši adresu.' }),
   ]);
 
-  if (emailMode === 'stub') {
-    card.append(el('div', { class: 'alert warn' }, [
-      el('strong', { text: 'Testovací režim: ' }),
-      el('span', { text: 'e-maily se neodesílají — odkaz najdete v dev inboxu na stránce „E-maily“.' }),
-    ]));
-  }
-
   const form = el('form', { id: 'login-form' }, [
     el('label', { text: 'E-mail' }),
     el('input', { type: 'email', name: 'email', required: true, autocomplete: 'email', placeholder: 'vas@email.cz' }),
@@ -493,9 +488,7 @@ async function viewLogin() {
       el('span', { class: 'auth-ico' }, [ico('mail', 30)]),
       el('h2', { text: 'Zkontrolujte svůj e-mail' }),
       el('p', { class: 'muted', text: 'Odkaz k přihlášení jsme odeslali na vaši adresu. Platí 15 minut a lze ho použít pouze jednou.' }),
-      emailMode === 'stub'
-        ? el('a', { class: 'btn secondary', href: '#/outbox', text: 'Otevřít dev inbox (test)' })
-        : el('button', { class: 'btn secondary', text: 'Zpět na přihlášení', onclick: () => viewLogin() }),
+      el('button', { class: 'btn secondary', text: 'Zpět na přihlášení', onclick: () => viewLogin() }),
     ]));
   };
 
