@@ -37,6 +37,7 @@ async function viewLanding() {
     };
     const hero = el('section', { class: 'hero-full' }, [
       el('div', { class: 'hero-inner' }, [
+        el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'hero-logo' }),
         el('span', { class: 'pill', text: 'Tělovýchovná jednota Krupka z.s.' }),
         el('h1', { text: 'Airbag. Skoky. Tvoje volba.' }),
         el('p', { class: 'lead', text: 'Dopadová matrace pro trénink MTB skoků. Staňte se členem TJK a užívejte členské výhody, nebo si kupte jednorázový vstup — v obou případech stačí registrace, souhlasy a platba.' }),
@@ -255,7 +256,7 @@ async function viewRegister() {
   root.innerHTML = '';
 
   const brand = el('a', { class: 'auth-brand', href: '#/' }, [
-    el('span', { class: 'brand-mark', 'aria-hidden': 'true' }),
+    el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'brand-logo' }),
     el('span', { class: 'auth-brand-text' }, [
       el('strong', { text: 'Tělovýchovná jednota Krupka' }),
       el('small', { text: 'členská aplikace' }),
@@ -464,7 +465,7 @@ async function viewLogin() {
   } catch (e) { /* offline: předpokládáme smtp */ }
 
   const brand = el('a', { class: 'auth-brand', href: '#/' }, [
-    el('span', { class: 'brand-mark', 'aria-hidden': 'true' }),
+    el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'brand-logo' }),
     el('span', { class: 'auth-brand-text' }, [
       el('strong', { text: 'Tělovýchovná jednota Krupka' }),
       el('small', { text: 'členská aplikace' }),
@@ -560,7 +561,7 @@ async function viewGuardian(token) {
     root.append(
       el('div', { class: 'auth-wrap' }, [
         el('div', { class: 'auth-brand' }, [
-          el('span', { class: 'brand-mark', 'aria-hidden': 'true' }),
+          el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'brand-logo' }),
           el('span', { class: 'auth-brand-text' }, [
             el('strong', { text: 'Tělovýchovná jednota Krupka' }),
             el('small', { text: 'členská aplikace' }),
@@ -579,7 +580,7 @@ async function viewGuardian(token) {
   const m = data.member;
   root.append(el('div', { class: 'auth-wrap' }, [
     el('a', { class: 'auth-brand', href: '#/' }, [
-      el('span', { class: 'brand-mark', 'aria-hidden': 'true' }),
+      el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'brand-logo' }),
       el('span', { class: 'auth-brand-text' }, [
         el('strong', { text: 'Tělovýchovná jednota Krupka' }),
         el('small', { text: 'členská aplikace' }),
@@ -655,7 +656,7 @@ async function viewGuardian(token) {
       root.append(
         el('div', { class: 'auth-wrap' }, [
           el('div', { class: 'auth-brand' }, [
-            el('span', { class: 'brand-mark', 'aria-hidden': 'true' }),
+            el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'brand-logo' }),
             el('span', { class: 'auth-brand-text' }, [
               el('strong', { text: 'Tělovýchovná jednota Krupka' }),
               el('small', { text: 'členská aplikace' }),

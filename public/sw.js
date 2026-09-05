@@ -1,17 +1,17 @@
 // sw.js — Service Worker: app shell cache + offline režim pro členskou kartu a provozní řád.
 'use strict';
 
-const CACHE = 'airbag-v29';
+const CACHE = 'airbag-v30';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/app.css?v=29',
-  '/js/api.js?v=29',
-  '/js/ui.js?v=29',
-  '/js/views-public.js?v=29',
-  '/js/views-member.js?v=29',
-  '/js/views-admin.js?v=29',
-  '/js/app.js?v=29',
+  '/css/app.css?v=30',
+  '/js/api.js?v=30',
+  '/js/ui.js?v=30',
+  '/js/views-public.js?v=30',
+  '/js/views-member.js?v=30',
+  '/js/views-admin.js?v=30',
+  '/js/app.js?v=30',
   '/manifest.json',
   '/favicon.ico',
   '/favicon-16.png',
@@ -19,6 +19,7 @@ const SHELL = [
   '/apple-touch-icon.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/img/tjk-logo.png',
 ];
 
 // API odpovědi, které se cachují pro offline (členská karta, dokumenty)

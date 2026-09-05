@@ -166,22 +166,11 @@ body::after { content: ""; position: fixed; inset: 0; z-index: -1; background: v
   background: linear-gradient(var(--bg-0) 78%, transparent);
 }
 .brand { display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--text-0); min-width: 0; }
-.brand-mark {
+.brand-logo {
   width: 40px; height: 40px; border-radius: 11px; flex: none;
-  background: linear-gradient(150deg, var(--pine-500), var(--pine-700) 55%, var(--pine-900));
-  position: relative; overflow: hidden;
-  box-shadow: 0 5px 14px -5px var(--primary-glow), inset 0 1px 0 rgba(255, 255, 255, 0.28);
-}
-.brand-mark::before {
-  content: ""; position: absolute; left: 50%; top: 46%; transform: translate(-50%, -74%);
-  width: 21px; height: 12px;
-  border: 2.5px solid rgba(255, 255, 255, 0.96); border-bottom: 0;
-  border-radius: 21px 21px 0 0 / 12px 12px 0 0;
-}
-.brand-mark::after {
-  content: ""; position: absolute; right: 7px; bottom: 7px;
-  width: 6px; height: 6px; border-radius: 50%; background: #fff;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16);
+  object-fit: contain; background: transparent;
+  drop-shadow: 0 5px 14px -5px var(--primary-glow);
+  -webkit-filter: drop-shadow(0 5px 14px -5px var(--primary-glow));
 }
 .brand-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .brand-text strong { font-family: var(--font-display); font-size: 0.95rem; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -536,6 +525,8 @@ select {
 }
 @keyframes heroPulse { 0%, 100% { opacity: 0.22; transform: scale(1); } 50% { opacity: 0.34; transform: scale(1.05); } }
 .hero-inner { max-width: 1060px; margin: 0 auto; padding: 60px 22px 46px; position: relative; z-index: 1; }
+.hero-logo { width: 108px; height: 108px; object-fit: contain; margin-bottom: 22px; filter: drop-shadow(0 12px 30px rgba(0,0,0,0.35)); }
+@media (max-width: 640px) { .hero-logo { width: 86px; height: 86px; margin-bottom: 16px; } }
 .hero-inner h1 { color: #fff; font-size: clamp(2rem, 4.4vw + 1rem, 3.3rem); max-width: 15ch; margin-bottom: 14px; letter-spacing: -0.035em; line-height: 1.05; }
 .hero-inner .lead { color: rgba(255, 255, 255, 0.82); max-width: 52ch; font-size: 1.08rem; }
 .hero-inner .pill {
@@ -633,7 +624,7 @@ select {
 .auth-wrap { max-width: 480px; margin: 26px auto 0; display: flex; flex-direction: column; gap: 14px; }
 .auth-wrap.auth-wide { max-width: 660px; }
 .auth-brand { display: flex; justify-content: center; align-items: center; gap: 11px; text-decoration: none; color: var(--text-0); }
-.auth-brand .brand-mark { width: 44px; height: 44px; }
+.auth-brand .brand-logo { width: 44px; height: 44px; }
 .auth-brand-text { display: flex; flex-direction: column; line-height: 1.2; }
 .auth-brand-text strong { font-family: var(--font-display); font-size: 1.05rem; font-weight: 750; letter-spacing: -0.01em; }
 .auth-brand-text small { color: var(--text-2); font-size: 0.64rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase; }
