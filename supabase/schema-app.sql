@@ -43,6 +43,8 @@ create table if not exists app.members (
   email              text not null unique,
   phone              text not null default '',
   membership_type    text not null references app.member_types(code),
+  membership_kind    text not null default 'sportovni',  -- sportovni | radne (nový člen = sportovní)
+  photo              text,               -- base64 data-URL (povinné při registraci)
   role               text not null default 'member',   -- member | dozor | vybor | superadmin
   status             text not null default 'registered',
   guardian_name      text,
@@ -59,6 +61,18 @@ create table if not exists app.members (
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now()
 );
+
+-- Notifikace v aplikaci (např. schválení/neschválení členství)
+create table if not exists app.notifications (
+  id            uuid primary key default gen_random_uuid(),
+  member_id     uuid not null references app.members(id) on delete cascade,
+  type          text not null,          -- membership_approved | membership_rejected | ...
+  title         text not null,
+  body          text not null,
+  read          boolean not null default false,
+  created_at    timestamptz not null default now()
+);
+create index if not exists idx_notifications_member on app.notifications (member_id, read);
 
 -- Verzované právní dokumenty (provozní řád, GDPR, …)
 create table if not exists app.doc_versions (

@@ -69,12 +69,34 @@ async function api(method, pathname, body, { raw = false, headers = {} } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 1×1 PNG (tiny) jako validní base64 data-URL — registrace vyžaduje foto
+const TEST_PHOTO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 async function registerAdult() {
   return api('POST', '/api/register', {
     firstName: 'Test', lastName: 'Dospely', birthDate: '1990-05-20',
     street: 'Horni 12', city: 'Krupka', zip: '417 41',
     email: `dospely${Date.now()}@test.cz`, phone: '+420 777 000 001',
+    photo: TEST_PHOTO,
   });
+}
+
+// Přihlásí se jako superadmin (čerstvý magic-link token z outboxu).
+async function reloginSuperAdmin() {
+  await api('POST', '/api/login', { email: 'miroslavbrozek@gmail.com' });
+  const ob = await api('GET', '/api/outbox');
+  const mail = ob.messages.find((m) => m.to === 'miroslavbrozek@gmail.com' && m.subject.includes('přihlášení'));
+  const tok = mail && (mail.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
+  await api('POST', `/api/login/${tok}`);
+}
+
+// Přihlásí se jako libovolný člen (magic-link token z outboxu).
+async function loginAs(email) {
+  await api('POST', '/api/login', { email });
+  const ob = await api('GET', '/api/outbox');
+  const mail = ob.messages.find((m) => m.to === email && m.subject.includes('přihlášení'));
+  const tok = mail && (mail.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
+  await api('POST', `/api/login/${tok}`);
 }
 
 async function main() {
@@ -143,6 +165,7 @@ async function main() {
     firstName: 'Test', lastName: 'Mladez', birthDate: '2010-03-10',
     street: 'Dolni 5', city: 'Krupka', zip: '417 41',
     email: `mladez${Date.now()}@test.cz`, phone: '+420 777 000 002',
+    photo: TEST_PHOTO,
     guardian: { name: 'Rodic Test', relation: 'matka', email: `rodic${Date.now()}@test.cz`, phone: '+420 777 000 003' },
   });
   check('Registrace mladistvého OK', regMinor && regMinor.guardianRequired === true);
@@ -307,6 +330,53 @@ async function main() {
   check('Admin: detail člena — auditní stopa souhlasů s IP+UA', adminDetail.consents.length >= 5 && adminDetail.consents.every((c) => c.ip && c.identity));
   check('Admin: detail člena — platby + karta', adminDetail.payments.length >= 1 && !!adminDetail.card);
 
+  // ---------- SCHVALOVÁNÍ ČLENSTVÍ (admin: approve/reject/defer + notifikace + e-mail) ----------
+  const cand = await api('POST', '/api/register', {
+    firstName: 'Test', lastName: 'Schvalovani', birthDate: '1993-06-06',
+    street: 'S 1', city: 'Krupka', zip: '417 41', email: `schval${Date.now()}@test.cz`,
+    photo: TEST_PHOTO,
+  });
+  check('Registrace kandidáta (foto): membershipKind=sportovni', cand.member && cand.member.membershipKind === 'sportovni', JSON.stringify({ kind: cand.member && cand.member.membershipKind }));
+
+  // zpět jako superadmin (registrace kandidáta přepsala cookie na kandidáta)
+  await reloginSuperAdmin();
+
+  // SCHVÁLIT
+  const appr = await api('POST', `/api/admin/members/${cand.member.id}/approve`, { action: 'approve' });
+  check('Admin: schválit → active', appr.status === 'active', JSON.stringify({ status: appr.status, action: appr.action }));
+
+  // notifikace členovi — přihlásíme se jako kandidát a přečteme
+  await loginAs(cand.member.email);
+  const notif = await api('GET', '/api/notifications');
+  check('Notifikace: schválení v aplikaci (unread ≥1)', notif.notifications && notif.notifications.some((n) => n.type === 'membership_approve'), JSON.stringify((notif.notifications||[]).map((n)=>n.type)));
+
+  // NESCHVÁLIT (nový kandidát) — jako superadmin
+  await reloginSuperAdmin();
+  const cand2 = await api('POST', '/api/register', {
+    firstName: 'Test', lastName: 'Zamitnuty', birthDate: '1991-07-07',
+    street: 'Z 2', city: 'Krupka', zip: '417 41', email: `zamit${Date.now()}@test.cz`,
+    photo: TEST_PHOTO,
+  });
+  await reloginSuperAdmin();
+  const rej = await api('POST', `/api/admin/members/${cand2.member.id}/approve`, { action: 'reject' });
+  check('Admin: neschválit → rejected', rej.status === 'rejected', JSON.stringify({ status: rej.status }));
+
+  // ODLOŽIT
+  const def = await api('POST', `/api/admin/members/${cand2.member.id}/approve`, { action: 'defer' });
+  check('Admin: odložit → deferred', def.status === 'deferred', JSON.stringify({ status: def.status }));
+
+  // dozor NEMŮŽE schvalovat (jen admin)
+  const loginDozorChk = await api('POST', '/api/login', { email: 'dozor@airbag.test' });
+  const obD = await api('GET', '/api/outbox');
+  const dMail = obD.messages.find((m) => m.to === 'dozor@airbag.test' && m.subject.includes('přihlášení'));
+  const dTok = dMail && (dMail.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
+  await api('POST', `/api/login/${dTok}`);
+  const dozorApprove = await api('POST', `/api/admin/members/${cand.member.id}/approve`, { action: 'approve' });
+  check('Dozor NEMÁ přístup ke schválení (403, jen admin)', dozorApprove.error === 'NEDOSTATECNA_PRAVA', JSON.stringify(dozorApprove));
+  // zpět na superadmin session (čerstvý token — registrace kandidáta přepsala cookie)
+  await reloginSuperAdmin();
+
+
   const saTypes = await api('GET', '/api/superadmin/member-types');
   check('Superadmin: jen aktivní kategorie (3)', saTypes.types.length === 3 && saTypes.types.every((t) => ['dospele', 'mladez', 'dite'].includes(t.code)), `${saTypes.types.length} typů: ${saTypes.types.map((t) => t.code).join(',')}`);
 
@@ -329,6 +399,7 @@ async function main() {
     firstName: 'Test', lastName: 'Dite', birthDate: '2014-07-01',
     street: 'Lesni 3', city: 'Krupka', zip: '417 41',
     email: `dite${Date.now()}@test.cz`, phone: '+420 777 000 004',
+    photo: TEST_PHOTO,
     guardian: { name: 'Rodic Dite', relation: 'otec', email: `rodicdite${Date.now()}@test.cz` },
   });
   check('Kategorie z věku: dite', regKid.member && regKid.member.membershipType === 'dite', regKid.member && regKid.member.membershipType);
@@ -370,6 +441,7 @@ async function main() {
     firstName: 'Test', lastName: 'BezRodice', birthDate: '1988-02-02',
     street: 'Kratka 1', city: 'Krupka', zip: '417 41',
     email: `bezrodice${Date.now()}@test.cz`,
+    photo: TEST_PHOTO,
   });
   check('Dospělý bez rodiče zaregistrován', regAdult2.member && regAdult2.member.id);
   const resendNoPending = await api('POST', '/api/guardian-resend');
@@ -392,6 +464,7 @@ async function main() {
   const whReg = await api('POST', '/api/register', {
     firstName: 'Test', lastName: 'Webhook', birthDate: '1992-02-02',
     street: 'Web 1', city: 'Krupka', zip: '417 41', email: `webhook${Date.now()}@test.cz`,
+    photo: TEST_PHOTO,
   });
   check('Webhook: registrace OK', whReg.member && whReg.member.id, whReg.member && whReg.member.id);
   await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy'] });
@@ -425,6 +498,7 @@ async function main() {
     firstName: 'Test', lastName: 'Neclen', birthDate: '1990-03-03',
     street: 'X 9', city: 'Krupka', zip: '417 41',
     email: `neclen${Date.now()}@test.cz`, phone: '+420 777 000 009',
+    photo: TEST_PHOTO,
   });
   check('Nečlen: registrace OK', !!host.member, host.member && host.member.id);
   let meN = await api('GET', '/api/me');
@@ -445,6 +519,7 @@ async function main() {
   const minorReg = await api('POST', '/api/register', {
     firstName: 'Test', lastName: 'Minor', birthDate: '2010-01-01',
     street: 'X 1', city: 'Krupka', zip: '417 41', email: `neclenmin${Date.now()}@test.cz`,
+    photo: TEST_PHOTO,
     guardian: { name: 'Rodic Minora', relation: 'matka', email: `rodicmin${Date.now()}@test.cz` },
   });
   check('Mladistvý: registrace s rodičem OK (guardianRequired)', !!minorReg.member && minorReg.guardianRequired === true, JSON.stringify(minorReg.error || { gr: minorReg.guardianRequired }));
@@ -466,6 +541,7 @@ async function main() {
   const regC = await api('POST', '/api/register', {
     firstName: 'Test', lastName: 'Clen', birthDate: '1985-05-05',
     street: 'Ulice 1', city: 'Krupka', zip: '417 41', email: `clen${Date.now()}@test.cz`,
+    photo: TEST_PHOTO,
   });
   await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy'] });
   const p1 = await api('POST', '/api/payments', { purpose: 'prispevek' });

@@ -69,6 +69,8 @@ const Members = {
       id,
       role: 'member',
       status: data.status || 'registered',
+      membershipKind: data.membershipKind || 'sportovni',
+      photo: data.photo ?? null,
       guardianName: data.guardianName ?? null,
       guardianRelation: data.guardianRelation ?? null,
       guardianEmail: data.guardianEmail ?? null,
@@ -83,11 +85,11 @@ const Members = {
     };
     db.prepare(
       `INSERT INTO members (id, member_no, first_name, last_name, birth_date, street, city, zip,
-        email, phone, membership_type, role, status, guardian_name, guardian_relation,
+        email, phone, membership_type, membership_kind, photo, role, status, guardian_name, guardian_relation,
         guardian_email, guardian_phone, guardian_token, guardian_token_expires, guardian_status, valid_from, valid_until,
         created_at, updated_at)
       VALUES (@id, @memberNo, @firstName, @lastName, @birthDate, @street, @city, @zip,
-        @email, @phone, @membershipType, @role, @status, @guardianName, @guardianRelation,
+        @email, @phone, @membershipType, @membershipKind, @photo, @role, @status, @guardianName, @guardianRelation,
         @guardianEmail, @guardianPhone, @guardianToken, @guardianTokenExpires, @guardianStatus, @validFrom, @validUntil,
         @createdAt, @updatedAt)`
     ).run(row);
@@ -475,6 +477,33 @@ const Entitlements = {
       .get(memberId, now()),
 };
 
+const Notifications = {
+  create({ memberId, type, title, body }) {
+    const id = uuid();
+    const ts = now();
+    db.prepare(
+      `INSERT INTO notifications (id, member_id, type, title, body, read, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`
+    ).run(id, memberId, type, title, body, ts);
+    return this.getById(id);
+  },
+  getById: (id) => db.prepare('SELECT * FROM notifications WHERE id = ?').get(id),
+  listForMember(memberId) {
+    return db.prepare('SELECT * FROM notifications WHERE member_id = ? ORDER BY created_at DESC').all(memberId);
+  },
+  countUnread(memberId) {
+    const r = db.prepare('SELECT COUNT(*) AS c FROM notifications WHERE member_id = ? AND read = 0').get(memberId);
+    return r ? r.c : 0;
+  },
+  markRead(id, memberId) {
+    db.prepare('UPDATE notifications SET read = 1 WHERE id = ? AND member_id = ?').run(id, memberId);
+    return this.getById(id);
+  },
+  markAllRead(memberId) {
+    db.prepare('UPDATE notifications SET read = 1 WHERE member_id = ? AND read = 0').run(memberId);
+  },
+};
+
 module.exports = {
   db,
   raw,
@@ -495,4 +524,5 @@ module.exports = {
   Products,
   ProductVariants,
   Entitlements,
+  Notifications,
 };

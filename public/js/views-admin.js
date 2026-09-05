@@ -138,7 +138,12 @@ async function viewAdminDetail(memberId) {
 
   const info = el('div', { class: 'card' }, [
     el('h3', { text: `${m.firstName} ${m.lastName}` }),
+    m.photo ? el('div', { class: 'admin-photo-row' }, [
+      el('div', { class: 'admin-photo', style: `background-image:url(${m.photo})` }),
+      el('span', { class: 'tag ok', text: 'foto ✓' }),
+    ]) : el('div', { class: 'admin-photo-row' }, [el('span', { class: 'muted small', text: 'bez fotografie' })]),
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'ID člena' }), el('span', { class: 'mono', text: m.id })]),
+    el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Členství' }), el('span', { text: m.membershipKind === 'radne' ? 'řádné' : 'sportovní' })]),
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Datum narození' }), el('span', { text: m.birthDate })]),
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Kontakt' }), el('span', { text: `${m.email}${m.phone ? ' · ' + m.phone : ''}` })]),
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Typ členství' }), el('span', { text: MEMBERSHIP_LABEL[m.membershipType] || m.membershipType })]),
@@ -146,8 +151,9 @@ async function viewAdminDetail(memberId) {
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Platnost' }), el('span', { text: m.validUntil ? `do ${fmtDate(m.validUntil)}` : '—' })]),
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Zákonný zástupce' }), el('span', { text: d.member.guardianStatus === 'not_required' ? 'není vyžadován' : `${d.member.guardianName} (${d.member.guardianRelation}) — ${d.member.guardianStatus}` })]),
     el('div', { class: 'btn-row' }, [
-      el('button', { class: 'btn accent small', text: 'Schválit / aktivovat', onclick: () => setStatus(m.id, 'active') }),
-      el('button', { class: 'btn secondary small', text: 'Zamítnout', onclick: () => setStatus(m.id, 'rejected') }),
+      el('button', { class: 'btn accent small', text: '✓ Schválit', onclick: () => approveMember(m.id, 'approve') }),
+      el('button', { class: 'btn bad small', text: '✕ Neschválit', onclick: () => approveMember(m.id, 'reject') }),
+      el('button', { class: 'btn secondary small', text: '⏸ Odložit', onclick: () => approveMember(m.id, 'defer') }),
     ]),
   ]);
   root.append(info);
@@ -181,10 +187,10 @@ async function viewAdminDetail(memberId) {
   }
   root.append(pays);
 
-  async function setStatus(id, status) {
+  async function approveMember(id, action) {
     try {
-      await API.post(`/admin/members/${id}/status`, { status });
-      toast('Status aktualizován');
+      await API.post(`/admin/members/${id}/approve`, { action });
+      toast(action === 'approve' ? 'Členství schváleno (e-mail + notifikace odeslány)' : action === 'reject' ? 'Členství neschváleno (e-mail + notifikace odeslány)' : 'Členství odloženo');
       viewAdminDetail(id);
     } catch (e) {
       toast(e.message, true);

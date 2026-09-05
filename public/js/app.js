@@ -16,6 +16,7 @@ const routes = [
   // route se vrátí jedním řádkem: { pattern: /^#\/akce$/, view: viewEvents, name: 'Akce', icon: 'calendar' },
   { pattern: /^#\/pravidla$/, view: viewRules, name: 'Pravidla provozu', icon: 'shield' },
   { pattern: /^#\/profil$/, view: viewProfile, name: 'Profil', icon: 'user' },
+  { pattern: /^#\/notifikace$/, view: viewNotifications, name: 'Notifikace', icon: 'bell' },
   { pattern: /^#\/admin$/, view: viewAdmin, name: 'Správa', icon: 'dashboard' },
   { pattern: /^#\/admin\/(.+)$/, view: (m) => viewAdminDetail(m[1]) },
   { pattern: /^#\/superadmin$/, view: viewSuperAdmin, name: 'Vlastník', icon: 'shield' },
@@ -48,6 +49,19 @@ async function render() {
     );
   }
   renderNav();
+  refreshNotifBadge().catch(() => {});
+}
+let notifUnread = 0;
+async function refreshNotifBadge() {
+  if (!isLoggedIn()) { notifUnread = 0; return; }
+  try {
+    notifUnread = await fetchUnreadCount();
+  } catch (e) { notifUnread = 0; }
+  // aktualizovat badge v DOM
+  document.querySelectorAll('.notif-badge').forEach((b) => {
+    b.textContent = notifUnread > 0 ? String(notifUnread) : '';
+    b.style.display = notifUnread > 0 ? '' : 'none';
+  });
 }
 
 function renderNav() {
@@ -77,6 +91,8 @@ function renderNav() {
   if (isLoggedIn() && isStaff()) moreItems.push({ href: '#/admin', label: 'Správa', icon: 'dashboard' });
   if (isLoggedIn() && isSuperAdmin()) moreItems.push({ href: '#/superadmin', label: 'Vlastník', icon: 'shield' });
   if (isLoggedIn() && isSuperAdmin()) moreItems.push({ href: '#/katalog-admin', label: 'Katalog (admin)', icon: 'bag' });
+  // Notifikace (schválení/neschválení členství) — badge s počtem nepřečtených
+  if (isLoggedIn()) moreItems.push({ href: '#/notifikace', label: 'Notifikace', icon: 'bell', badge: true });
   // Dev inbox (outbox) je chráněn přihlášením — nabídka jen pro přihlášené
   if (isLoggedIn()) moreItems.push({ href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' });
 
@@ -102,6 +118,7 @@ function renderNav() {
           ? [{ href: '#/profil', label: `Můj profil — ${me.member.firstName}`, icon: 'user' }]
               .concat(isStaff() ? [{ href: '#/admin', label: 'Správa', icon: 'dashboard' }] : [])
               .concat(isSuperAdmin() ? [{ href: '#/superadmin', label: 'Vlastník', icon: 'shield' }] : [])
+              .concat([{ href: '#/notifikace', label: 'Notifikace', icon: 'bell' }])
               .concat([{ href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' }])
           : [{ href: '#/prihlaseni', label: 'Přihlásit se', icon: 'key' }, { href: '#/registrace', label: 'Registrace', icon: 'edit' }],
       },
@@ -113,6 +130,7 @@ function renderNav() {
         const a = el('a', { href: it.href, class: 'mm-item' + (isActive(it.href) ? ' active' : '') }, [
           el('span', { class: 'mm-icon' }, [ico(it.icon, 18)]),
           el('span', { text: it.label }),
+          it.href === '#/notifikace' ? el('span', { class: 'notif-badge', style: 'display:none' }) : null,
         ]);
         a.addEventListener('click', () => closeMenu());
         mobileMenu.append(a);

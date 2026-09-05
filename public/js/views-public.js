@@ -287,6 +287,15 @@ async function viewRegister() {
         el('div', {}, [el('label', { text: 'Město' }), el('input', { type: 'text', name: 'city', required: true })]),
         el('div', {}, [el('label', { text: 'PSČ' }), el('input', { type: 'text', name: 'zip', required: true, inputmode: 'numeric' })]),
         el('div', { class: 'full' }, [el('label', { text: 'Telefon (volitelné)' }), el('input', { type: 'tel', name: 'phone' })]),
+        el('div', { class: 'full' }, [
+          el('label', { text: 'Fotografie (povinné)' }),
+          el('div', { class: 'photo-upload' }, [
+            el('input', { type: 'file', id: 'reg-photo', name: 'photoFile', accept: 'image/*', style: 'display:none' }),
+            el('div', { id: 'reg-photo-preview', class: 'photo-preview', text: 'Vybrat fotografii' }),
+            el('button', { type: 'button', class: 'btn small', text: 'Nahrát fotografii', onclick: () => $('#reg-photo').click() }),
+            el('p', { class: 'muted small', text: 'Nahrajte portrétovou fotku (JPG/PNG/WebP, max 3 MB). Požaduje se při registraci.' }),
+          ]),
+        ]),
       ]),
     ]),
 
@@ -361,6 +370,33 @@ async function viewRegister() {
   birthInput.addEventListener('change', updateAgeCategory);
   birthInput.addEventListener('input', updateAgeCategory);
 
+  // Fotografie: čtení souboru → data-URL + preview
+  let photoData = '';
+  const photoInput = $('#reg-photo');
+  const photoPreview = $('#reg-photo-preview');
+  if (photoInput && photoPreview) {
+    photoInput.addEventListener('change', (ev) => {
+      const file = (ev.target.files || [])[0];
+      if (!file) return;
+      if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.type)) {
+        toast('Vyberte obrázek (JPG/PNG/WebP)', true);
+        return;
+      }
+      if (file.size > 3 * 1024 * 1024) {
+        toast('Fotografie je příliš velká (max 3 MB)', true);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        photoData = reader.result;
+        photoPreview.style.backgroundImage = `url(${photoData})`;
+        photoPreview.classList.add('has-photo');
+        photoPreview.textContent = '';
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     clearFieldErrors(form);
@@ -370,7 +406,15 @@ async function viewRegister() {
       firstName: data.firstName, lastName: data.lastName, birthDate: data.birthDate,
       street: data.street, city: data.city, zip: data.zip,
       email: data.email, phone: data.phone,
+      photo: photoData,
     };
+    if (!photoData) {
+      fieldError(form, 'photoFile', 'Fotografie je povinná.');
+      const pv = $('#reg-photo-preview');
+      if (pv) pv.classList.add('err');
+      toast('Nahrajte prosím fotografii', true);
+      return;
+    }
     const guardianVisible = !guardianCard.hidden;
     if (guardianVisible) {
       payload.guardian = {

@@ -91,13 +91,13 @@ const Members = {
     await raw.run(
       `INSERT INTO ${T('members')}
         (id, member_no, first_name, last_name, birth_date, street, city, zip,
-         email, phone, membership_type, role, status, guardian_name, guardian_relation,
+         email, phone, membership_type, membership_kind, photo, role, status, guardian_name, guardian_relation,
          guardian_email, guardian_phone, guardian_token, guardian_token_expires, guardian_status,
          valid_from, valid_until, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
       [id, data.memberNo ?? null, data.firstName, data.lastName, data.birthDate,
         data.street || '', data.city || '', data.zip || '', data.email, data.phone || '',
-        data.membershipType, data.role || 'member', data.status || 'registered',
+        data.membershipType, data.membershipKind || 'sportovni', data.photo ?? null, data.role || 'member', data.status || 'registered',
         data.guardianName ?? null, data.guardianRelation ?? null,
         data.guardianEmail ?? null, data.guardianPhone ?? null,
         data.guardianToken ?? null, data.guardianTokenExpires ?? null,
@@ -580,6 +580,36 @@ const Events = {
   },
 };
 
+const Notifications = {
+  async create({ memberId, type, title, body }) {
+    const id = uuid();
+    const ts = now();
+    await raw.run(
+      `INSERT INTO ${T('notifications')} (id, member_id, type, title, body, read, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [id, memberId, type, title, body, false, ts]
+    );
+    return this.getById(id);
+  },
+  async getById(id) {
+    return raw.get(`SELECT * FROM ${T('notifications')} WHERE id = $1`, [id]);
+  },
+  async listForMember(memberId) {
+    return raw.all(`SELECT * FROM ${T('notifications')} WHERE member_id = $1 ORDER BY created_at DESC`, [memberId]);
+  },
+  async countUnread(memberId) {
+    const r = await raw.get(`SELECT COUNT(*) AS c FROM ${T('notifications')} WHERE member_id = $1 AND read = false`, [memberId]);
+    return r ? Number(r.c) : 0;
+  },
+  async markRead(id, memberId) {
+    await raw.run(`UPDATE ${T('notifications')} SET read = true WHERE id = $1 AND member_id = $2`, [id, memberId]);
+    return this.getById(id);
+  },
+  async markAllRead(memberId) {
+    await raw.run(`UPDATE ${T('notifications')} SET read = true WHERE member_id = $1 AND read = false`, [memberId]);
+  },
+};
+
 module.exports = {
   pool,
   raw,
@@ -600,4 +630,5 @@ module.exports = {
   Products,
   ProductVariants,
   Entitlements,
+  Notifications,
 };

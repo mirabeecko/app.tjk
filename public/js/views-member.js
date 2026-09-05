@@ -540,6 +540,52 @@ async function viewProfile() {
   root.append(btn);
 }
 
+/* ---------- NOTIFIKACE (schválení/neschválení členství) ---------- */
+async function viewNotifications() {
+  const root = $('#view');
+  root.innerHTML = '';
+  if (!me || !me.member) {
+    root.append(el('div', { class: 'alert warn', text: 'Nejste přihlášeni.' }), el('a', { class: 'btn', href: '#/prihlaseni', text: 'Přihlásit se' }));
+    return;
+  }
+  let data;
+  try {
+    data = await API.get('/notifications');
+  } catch (e) {
+    root.append(el('div', { class: 'alert err', text: e.message }));
+    return;
+  }
+  root.append(el('h1', { text: 'Notifikace' }));
+  if (!data.notifications.length) {
+    root.append(el('div', { class: 'empty', text: 'Zatím žádné notifikace.' }));
+    return;
+  }
+  const card = el('div', { class: 'card' });
+  for (const n of data.notifications) {
+    const row = el('div', { class: 'list-row' + (n.read ? '' : ' is-unread') }, [
+      el('div', {}, [
+        el('div', { class: 'l-name' }, [el('strong', { text: n.title }), n.read ? '' : el('span', { class: 'tag warn', text: 'nové' })]),
+        el('div', { class: 'l-sub', text: n.body }),
+        el('div', { class: 'small muted', text: fmtDateTime(n.createdAt) }),
+      ]),
+    ]);
+    card.append(row);
+  }
+  root.append(card);
+  // označit vše jako přečtené
+  API.post('/notifications/read-all').catch(() => {});
+}
+
+// Pomocná funkce pro badge (nepřečtené) — volá se z app.js
+async function fetchUnreadCount() {
+  try {
+    const r = await API.get('/notifications/unread-count');
+    return r.unread || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
 /* ---------- AKCE SPOLKU + přihlášení na akci ---------- */
 async function viewEvents() {
   const root = $('#view');

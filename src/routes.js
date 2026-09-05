@@ -92,6 +92,8 @@ function publicMember(m) {
     email: m.email,
     phone: m.phone,
     membershipType: m.membership_type,
+    membershipKind: m.membership_kind,
+    photo: m.photo,
     role: m.role,
     status: m.status,
     validFrom: m.valid_from,
@@ -152,11 +154,17 @@ async function hasAccess(m) {
 router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
   const v = validators();
   const b = req.body || {};
-  const { firstName, lastName, birthDate, street, city, zip, email, phone } = b;
+  const { firstName, lastName, birthDate, street, city, zip, email, phone, photo } = b;
   const guardian = b.guardian || {};
 
   const err = (msg) => res.status(400).json({ error: 'VALIDACE', message: msg });
   if (!firstName || !lastName) return err('Jméno a příjmení je povinné.');
+  if (!photo) return err('Fotografie je povinná.');
+  // foto = base64 data-URL obrázku (data:image/...;base64,...)
+  if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(photo)) {
+    return err('Fotografie musí být obrázek (JPG/PNG/WebP) nahraný jako data-URL.');
+  }
+  if (photo.length > 3 * 1024 * 1024) return err('Fotografie je příliš velká (max 3 MB).');
   if (!v.isDate(birthDate)) return err('Datum narození je ve špatném formátu (YYYY-MM-DD).');
   if (!v.isEmail(email)) return err('E-mail je ve špatném formátu.');
   if (!street || !city || !zip) return err('Adresa (ulice, město, PSČ) je povinná.');
@@ -191,6 +199,8 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
     firstName, lastName, birthDate,
     street, city, zip, email: email, phone: phone || '',
     membershipType,
+    membershipKind: 'sportovni',   // nový člen získá automaticky sportovní členství
+    photo,
     status: 'registered',
     guardianName: guardianRequired ? guardian.name : null,
     guardianRelation: guardianRequired ? guardian.relation : null,
@@ -371,6 +381,35 @@ router.get('/me', A.requireMember, asyncRoute(async (req, res) => {
     })),
     entitlements,
   });
+}));
+
+// ---------- NOTIFIKACE v aplikaci (schválení/neschválení členství apod.) ----------
+router.get('/notifications', A.requireMember, asyncRoute(async (req, res) => {
+  const list = await D.Notifications.listForMember(req.member.id);
+  const unread = await D.Notifications.countUnread(req.member.id);
+  res.json({
+    unread,
+    notifications: list.map((n) => ({
+      id: n.id, type: n.type, title: n.title, body: n.body,
+      read: !!(n.read), createdAt: n.created_at,
+    })),
+  });
+}));
+
+router.get('/notifications/unread-count', A.requireMember, asyncRoute(async (req, res) => {
+  const unread = await D.Notifications.countUnread(req.member.id);
+  res.json({ unread });
+}));
+
+router.post('/notifications/:id/read', A.requireMember, asyncRoute(async (req, res) => {
+  const n = await D.Notifications.markRead(req.params.id, req.member.id);
+  if (!n) return res.status(404).json({ error: 'NENALEZENO' });
+  res.json({ ok: true });
+}));
+
+router.post('/notifications/read-all', A.requireMember, asyncRoute(async (req, res) => {
+  await D.Notifications.markAllRead(req.member.id);
+  res.json({ ok: true });
 }));
 
 // ---------- SKUPINY SOUHLASŮ (rozdělený flow: členství → služba → zástupce) ----------
@@ -889,15 +928,40 @@ router.get('/admin/members/:id', A.requireSuperAdmin, asyncRoute(async (req, res
   });
 }));
 
-router.post('/admin/members/:id/status', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+// Admin schvaluje členství: approve | reject | defer. E-mail + notifikace v aplikaci.
+router.post('/admin/members/:id/approve', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const m = await D.Members.getById(req.params.id);
   if (!m) return res.status(404).json({ error: 'NENALEZENO' });
-  const { status } = req.body || {};
-  if (!['active', 'rejected', 'expired', 'registered'].includes(status)) {
-    return res.status(400).json({ error: 'VALIDACE', message: 'Neplatný stav.' });
+  const { action } = req.body || {};
+  if (!['approve', 'reject', 'defer'].includes(action)) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Neplatná akce (approve|reject|defer).' });
   }
-  const updated = await D.Members.update(m.id, { status });
-  res.json({ ok: true, member: publicMember(updated), status: effectiveStatus(updated) });
+  const newStatus = action === 'approve' ? 'active' : action === 'reject' ? 'rejected' : 'deferred';
+  const updated = await D.Members.update(m.id, { status: newStatus });
+  const fullName = `${m.first_name} ${m.last_name}`;
+
+  // Notifikace členovi v aplikaci
+  const notifyTitle = action === 'approve' ? 'Členství schváleno' : action === 'reject' ? 'Členství neschváleno' : 'Členství odloženo';
+  const notifyBody = action === 'approve'
+    ? `Vaše členství bylo schváleno. Vítejte mezi členy TJ Krupka!`
+    : action === 'reject'
+      ? `Vaše členství nebylo schváleno. Kontaktujte prosím správce spolku pro více informací.`
+      : `Vaše členství bylo odloženo — o rozhodnutí budete informováni.`;
+  try {
+    await D.Notifications.create({ memberId: m.id, type: `membership_${action}`, title: notifyTitle, body: notifyBody });
+  } catch (e) { console.log('[notif] CHYBA', e.message); }
+
+  // E-mail členovi (fire-and-forget; s reálným SMTP se skutečně odešle)
+  const subject = action === 'approve'
+    ? `Členství schváleno — TJ Krupka`
+    : action === 'reject'
+      ? `Členství neschváleno — TJ Krupka`
+      : `Členství odloženo — TJ Krupka`;
+  try {
+    await mailer.sendEmail(m.id, m.email, subject, notifyBody);
+  } catch (e) { console.log('[mail] CHYBA', e.message); }
+
+  res.json({ ok: true, member: publicMember(updated), status: effectiveStatus(updated), action });
 }));
 
 router.get('/admin/stats', A.requireSuperAdmin, asyncRoute(async (req, res) => {

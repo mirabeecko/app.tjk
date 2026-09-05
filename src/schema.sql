@@ -30,11 +30,12 @@ CREATE TABLE IF NOT EXISTS members (
   email           TEXT NOT NULL,
   phone           TEXT NOT NULL DEFAULT '',
   membership_type TEXT NOT NULL REFERENCES member_types(code),
+  membership_kind TEXT NOT NULL DEFAULT 'sportovni',  -- sportovni | radne (nový člen = sportovní)
+  photo           TEXT,                    -- base64 data-URL (povinné při registraci)
   role            TEXT NOT NULL DEFAULT 'member',   -- member|dozor|vybor|superadmin (vlastník)
   status          TEXT NOT NULL DEFAULT 'registered',
-                  -- registered -> consent_pending -> payment_pending -> active
-                  -- guardian_pending (mladiství: čeká na souhlas rodiče)
-                  -- expired | rejected
+                  -- registered -> consent_pending -> payment_pending -> review -> active
+                  -- review (čeká na schválení admina) -> active | rejected | deferred
   guardian_name     TEXT,                -- jméno zákonného zástupce
   guardian_relation TEXT,                -- vztah (matka/otec/...)
   guardian_email    TEXT,
@@ -62,6 +63,18 @@ CREATE TABLE IF NOT EXISTS doc_versions (
   created_at    TEXT NOT NULL,
   UNIQUE(doc_key, version)
 );
+
+-- Notifikace v aplikaci (např. schválení/neschválení členství)
+CREATE TABLE IF NOT EXISTS notifications (
+  id            TEXT PRIMARY KEY,        -- uuid
+  member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  type          TEXT NOT NULL,           -- membership_approved | membership_rejected | ...
+  title         TEXT NOT NULL,
+  body          TEXT NOT NULL,
+  read          INTEGER NOT NULL DEFAULT 0,  -- 0 = nepřečtená, 1 = přečtená
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_member ON notifications (member_id, read);
 
 -- AUDITNÍ STOPA souhlasů — neměnitelný záznam: kdo, s čím, kdy, odkud
 CREATE TABLE IF NOT EXISTS consents (

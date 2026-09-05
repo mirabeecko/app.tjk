@@ -396,6 +396,20 @@ select {
 .form-grid .full { grid-column: 1 / -1; }
 .field-error { color: var(--danger); font-size: 0.76rem; margin-top: 4px; font-weight: 700; }
 
+/* fotografie (registrace) */
+.photo-upload { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.photo-preview { width: 90px; height: 90px; border-radius: 12px; border: 1.5px dashed var(--border-strong); display: grid; place-items: center; text-align: center; color: var(--text-2); font-size: 0.74rem; background-size: cover; background-position: center; background-color: var(--bg-2); overflow: hidden; }
+.photo-preview.has-photo { border-style: solid; background-color: var(--bg-1); }
+.photo-preview.err { border-color: var(--danger); color: var(--danger); }
+
+/* foto člena v admin detailu */
+.admin-photo-row { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.admin-photo { width: 72px; height: 72px; border-radius: 12px; background-size: cover; background-position: center; border: 1px solid var(--border); background-color: var(--bg-2); }
+
+/* notifikace */
+.notif-badge { margin-left: auto; background: var(--global-2); color: #fff; font-size: 0.66rem; font-weight: 800; min-width: 18px; height: 18px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; }
+.list-row.is-unread { background: rgba(127, 127, 127, 0.08); }
+
 /* souhlas checkbox */
 .check {
   display: flex; gap: 12px; align-items: flex-start;
