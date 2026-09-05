@@ -756,6 +756,22 @@ tbody tr:hover { background: var(--bg-2); }
 .comp-fill { height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease-out); }
 .comp-group + .comp-group { border-top: 1px solid var(--border); padding-top: 14px; }
 
+/* interaktivní koláčové grafy */
+.pie-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 860px) { .pie-grid { grid-template-columns: 1fr; } }
+.pie-card { padding: 16px; }
+.pie-body { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.pie-wrap { display: grid; place-items: center; }
+.pie-seg { transform-origin: center; }
+.pie-legend { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.pie-legend-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; }
+.pie-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.pie-legend-label { line-height: 1.2; }
+.pie-tooltip { position: fixed; z-index: 9999; pointer-events: none; background: var(--bg-0); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.82rem; display: none; box-shadow: 0 6px 18px rgba(0,0,0,0.18); }
+.pie-tooltip strong { display: block; font-size: 0.9rem; }
+.pie-tooltip span { color: var(--text-2); }
+
+
 /* Google přihlášení */
 .auth-google { margin-top: 16px; }
 .btn-block { width: 100%; justify-content: center; }

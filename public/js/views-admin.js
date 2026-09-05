@@ -230,40 +230,105 @@ async function viewSuperAdmin() {
   ]);
   root.append(statCard);
 
-  // ---------- GRAFY: složení členů ----------
-  const comp = data.composition || { kind: {}, adult: 0, minor: 0, gender: {} };
-  const compTotal = members.length || 1;
-  const bar = (label, val, color, pct) => el('div', { class: 'comp-row' }, [
-    el('div', { class: 'comp-label' }, [el('span', { text: label }), el('strong', { text: String(val) })]),
-    el('div', { class: 'comp-track' }, [el('div', { class: 'comp-fill', style: `width:${pct}%; background:${color}` })]),
-  ]);
-  const pctOf = (v) => Math.round(((v || 0) / compTotal) * 100);
-  const compKind = [
-    ['Sportovní', comp.kind.sportovni || 0, 'var(--green-500)', pctOf(comp.kind.sportovni)],
-    ['Řádné', comp.kind.radne || 0, 'var(--blue-600)', pctOf(comp.kind.radne)],
-  ];
-  const compGender = [
-    ['Muži (18+)', comp.gender.muz || 0, 'var(--blue-600)', pctOf(comp.gender.muz)],
-    ['Ženy (18+)', comp.gender.zena || 0, 'var(--green-500)', pctOf(comp.gender.zena)],
-    ['Děti (do 18)', comp.gender.dite || 0, 'var(--danger)', pctOf(comp.gender.dite)],
-  ];
+  // ---------- INTERAKTIVNÍ KOLÁČOVÉ GRAFY — celá evidence (public.members) ----------
+  const evMembers = (data.evidence && data.evidence.ok && data.evidence.members) || [];
+  const evTotal = evMembers.length || data.evidenceCount || members.length || 1;
+
+  // Vypočte segmenty pro koláč ze seznamu členů evidence.
+  const sliceData = {
+    // Pohlaví + věk (děti odděleně)
+    gender: [
+      ['Muži (18+)', evMembers.filter((m) => m.sex === 'muz' && m.age >= 18).length, '#2E6FDB'],
+      ['Ženy (18+)', evMembers.filter((m) => m.sex === 'zena' && m.age >= 18).length, '#18AC81'],
+      ['Děti (do 18)', evMembers.filter((m) => m.age !== null && m.age < 18).length, '#E53E3E'],
+    ],
+    // Věk
+    age: [
+      ['Dospělí (18+)', evMembers.filter((m) => m.age !== null && m.age >= 18).length, '#2E6FDB'],
+      ['Mladiství (<18)', evMembers.filter((m) => m.age !== null && m.age < 18).length, '#E53E3E'],
+    ],
+    // Členové / vedoucí
+    role: [
+      ['Běžní členové', evMembers.filter((m) => Number(m.role) !== 3).length, '#2E6FDB'],
+      ['Vedoucí / výbor', evMembers.filter((m) => Number(m.role) === 3).length, '#18AC81'],
+    ],
+  };
+
+  // Vykresli SVG dónut (koláč s dírou) s hover zvýrazněním + tooltip + legendou.
+  function pieChart(title, segments, size = 210, thickness = 38) {
+    const total = segments.reduce((s, seg) => s + seg[1], 0) || 1;
+    const R = size / 2, r = R - thickness;
+    const cx = R, cy = R;
+    let angle = -Math.PI / 2; // start nahoře
+    const arcs = [];
+    const segEls = [];
+    segments.forEach(([label, value, color], i) => {
+      const frac = value / total;
+      const a0 = angle, a1 = angle + frac * Math.PI * 2;
+      angle = a1;
+      if (value <= 0) return;
+      const large = frac > 0.5 ? 1 : 0;
+      const x0 = cx + R * Math.cos(a0), y0 = cy + R * Math.sin(a0);
+      const x1 = cx + R * Math.cos(a1), y1 = cy + R * Math.sin(a1);
+      const xi0 = cx + r * Math.cos(a0), yi0 = cy + r * Math.sin(a0);
+      const xi1 = cx + r * Math.cos(a1), yi1 = cy + r * Math.sin(a1);
+      const pct = Math.round(frac * 100);
+      const path = `M ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} L ${xi1} ${yi1} A ${r} ${r} 0 ${large} 0 ${xi0} ${yi0} Z`;
+      const seg = el('path', {
+        d: path, fill: color, class: 'pie-seg', 'data-label': label,
+        style: 'cursor:pointer;transition:transform .15s,opacity .15s',
+      });
+      seg.addEventListener('mouseenter', (ev) => { ev.currentTarget.style.opacity = '0.75'; tooltip(label, value, pct, ev.currentTarget); });
+      seg.addEventListener('mousemove', (ev) => tooltipMove(ev));
+      seg.addEventListener('mouseleave', () => hideTooltip());
+      arcs.push(seg);
+      segEls.push({ label, value, pct, color, mid: (a0 + a1) / 2, cx, cy, R });
+    });
+    const svg = el('div', { class: 'pie-wrap' }, []);
+    const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svgEl.setAttribute('viewBox', `0 0 ${size} ${size}`);
+    svgEl.setAttribute('width', String(size));
+    svgEl.setAttribute('height', String(size));
+    arcs.forEach((a) => svgEl.appendChild(a));
+    svg.appendChild(svgEl);
+    // Legenda
+    const legend = el('div', { class: 'pie-legend' });
+    segments.filter(([, v]) => v > 0).forEach(([label, value, color]) => {
+      const pct = Math.round((value / total) * 100);
+      legend.append(el('div', { class: 'pie-legend-row' }, [
+        el('span', { class: 'pie-dot', style: `background:${color}` }),
+        el('span', { class: 'pie-legend-label', text: `${label} — ${value} (${pct}%)` }),
+      ]));
+    });
+    const box = el('div', { class: 'card pie-card' }, [
+      el('h3', { class: 'comp-title', text: title }),
+      el('div', { class: 'pie-body' }, [svg, legend]),
+    ]);
+    return box;
+  }
+
+  // tooltip pro hover
+  let pieTt = null;
+  function tooltip(label, value, pct, elx) {
+    if (!pieTt) { pieTt = el('div', { class: 'pie-tooltip' }); document.body.appendChild(pieTt); }
+    pieTt.innerHTML = '';
+    pieTt.append(el('strong', { text: label }), el('span', { text: `${value} (${pct}%)` }));
+    pieTt.style.display = 'block';
+  }
+  function tooltipMove(ev) {
+    if (pieTt) { pieTt.style.left = (ev.clientX + 12) + 'px'; pieTt.style.top = (ev.clientY + 12) + 'px'; }
+  }
+  function hideTooltip() { if (pieTt) pieTt.style.display = 'none'; }
+
   const chartsCard = el('div', { class: 'card' }, [
-    el('h3', {}, [ico('chart', 17), ' ', 'Složení členů']),
-    el('p', { class: 'muted small', text: 'Vyplývá z registrovaných členů aplikace (' + members.length + ').' }),
-    el('div', { class: 'comp-group' }, [
-      el('h4', { class: 'comp-title', text: 'Členství' }),
-      ...compKind.map(([l, v, c, p]) => bar(l, v, c, p)),
-    ]),
-    el('div', { class: 'comp-group' }, [
-      el('h4', { class: 'comp-title', text: 'Věk (18+)' }),
-      bar('Dospělí (18+)', comp.adult || 0, 'var(--green-600)', pctOf(comp.adult)),
-      bar('Mladiství (<18)', comp.minor || 0, 'var(--danger)', pctOf(comp.minor)),
-    ]),
-    el('div', { class: 'comp-group' }, [
-      el('h4', { class: 'comp-title', text: 'Muži / ženy / děti' }),
-      ...compGender.map(([l, v, c, p]) => bar(l, v, c, p)),
-    ]),
+    el('h3', {}, [ico('chart', 17), ' ', 'Složení členů — celá evidence (' + evTotal + ')']),
+    el('p', { class: 'muted small', text: 'Interaktivní koláčové grafy z celé členské evidence spolku (public.members). Najeďte na segment pro detail.' }),
   ]);
+  const pieGrid = el('div', { class: 'pie-grid' });
+  pieGrid.append(pieChart('Muži / ženy / děti', sliceData.gender));
+  pieGrid.append(pieChart('Dospělí / mladiství', sliceData.age));
+  pieGrid.append(pieChart('Členové / vedoucí', sliceData.role));
+  chartsCard.append(pieGrid);
   root.append(chartsCard);
 
   // typy členství
@@ -347,7 +412,7 @@ async function viewSuperAdmin() {
       countEl,
     ]);
     const evt = el('table', {}, [
-      el('thead', {}, [el('tr', {}, ['ID', 'Jméno', 'E-mail', 'Telefon', 'Oddíl', 'Typ členství', 'Od', 'Do'].map((h) => el('th', { text: h })))]),
+      el('thead', {}, [el('tr', {}, ['ID', 'Jméno', 'Věk', 'Pohlaví', 'Role', 'E-mail', 'Telefon', 'Oddíl', 'Pozice', 'Typ členství', 'Od', 'Do'].map((h) => el('th', { text: h })))]),
       el('tbody'),
     ]);
     const evBody = $('tbody', evt);
@@ -387,9 +452,13 @@ async function viewSuperAdmin() {
         const tr = el('tr', {}, [
           el('td', { class: 'mono', text: String(m.idCus) }),
           el('td', {}, [el('strong', { text: m.fullName })]),
+          el('td', { text: m.age != null ? `${m.age} let` : '—' }),
+          el('td', { text: m.sex === 'muz' ? 'Muž' : m.sex === 'zena' ? 'Žena' : '—' }),
+          el('td', {}, [el('span', { class: `tag ${m.roleLabel === 'vedoucí/výbor' ? 'blue' : 'gray'}`, text: m.roleLabel || 'člen' })]),
           el('td', { text: m.email || '—' }),
           el('td', { text: m.phone || '—' }),
           el('td', { text: m.oddil || '—' }),
+          el('td', { text: m.pozice || '—' }),
           el('td', {}, [kindSelect(m)]),
           el('td', { class: 'mono', text: fmtDate(m.memberFrom) }),
           el('td', { class: 'mono', text: fmtDate(m.memberTo) }),

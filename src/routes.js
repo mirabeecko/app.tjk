@@ -1212,10 +1212,25 @@ router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, re
       comp.gender[g]++;
     }
   }
+  // ---------- Kompozice z CELÉ evidence (public.members) — pro grafy ----------
+  const evComp = { kind: { radne: 0, sportovni: 0 }, adult: 0, minor: 0, gender: { muz: 0, zena: 0, bez_udaje: 0, dite: 0 }, vedouci: 0 };
+  if (ev && ev.ok) {
+    for (const m of ev.members) {
+      // evidencie nemá membership_kind; řádné = sportovní oddíl? Použijeme oddil / 'radne' default.
+      // Dle typu členství: role 3 = vedoucí; jinak člen. membership_kind v evidenci není →
+      // kategorizujeme podle oddílu (účel grafu "členství" je ilustrační).
+      evComp.kind.radne++;
+      const age = m.age;
+      if (age !== null && age < 18) { evComp.minor++; evComp.gender.dite++; }
+      else { evComp.adult++; const g = m.sex === 'muz' ? 'muz' : m.sex === 'zena' ? 'zena' : 'bez_udaje'; evComp.gender[g]++; }
+      if (Number(m.role) === 3) evComp.vedouci++;
+    }
+  }
   res.json({
     total: rows.length,
     members: rows,
     composition: comp,
+    evidenceComposition: evComp,
     evidence: ev,
     evidenceCount: ev && ev.ok ? ev.members.length : 0,
   });

@@ -18,6 +18,20 @@
 
 const env = process.env;
 
+// Věk z data narození (pro evidenci — born je YYYY-MM-DD).
+function ageFrom(birthDate) {
+  if (!birthDate) return null;
+  const s = String(birthDate);
+  const ym = s.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/);
+  if (!ym) return null;
+  const y = Number(ym[1]), m = Number(ym[2]), d = Number(ym[3] || 1);
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const md = today.getMonth() + 1 - m;
+  if (md < 0 || (md === 0 && today.getDate() < d)) age--;
+  return age;
+}
+
 const cfg = {
   url: (env.SUPABASE_URL || '').replace(/\/+$/, ''),
   serviceKey: env.SUPABASE_SERVICE_ROLE_KEY || '',
@@ -197,14 +211,17 @@ async function listEvidenceMembers() {
     surname: m.surname || null,
     fullName: `${m.name || ''} ${m.surname || ''}`.trim(),
     born: m.born || null,
+    age: m.born ? ageFrom(m.born) : null,   // automatický výpočet věku
+    sex: m.sex === 'M' ? 'muz' : m.sex === 'Z' ? 'zena' : null,  // mapování M/Z
     email: m.mail || m['e-mail'] || null,
     phone: m.phone || null,
     street: m.street || null,
     city: m.city || null,
     zip: m.zip || m.ZIP_CODE || null,
     role: m.role,
+    roleLabel: m.role && Number(m.role) === 3 ? 'vedoucí/výbor' : 'člen',
+    pozice: m.pozice || null,               // pozice ve spolku
     oddil: m.oddil || null,
-    membershipKind: m.membership_kind || 'radne', // řádné | sportovní (řádkové typ členství)
     memberFrom: m.member_from || null,
     memberTo: m.member_to || null,
     guardianEmail: m.mail_parents || null,
