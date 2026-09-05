@@ -17,7 +17,7 @@ const router = express.Router();
 
 const { rateLimit } = require('./rate-limit');
 const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'login' });
-const registerLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, name: 'register' });
+const registerLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, name: 'register' });
 const guardianLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, name: 'guardian' });
 
 // Express 4 neposílá rejected promise do error middleware → obalíme handlery.
@@ -181,6 +181,12 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
   if (!type) return err('Neznámý typ členství.');
 
   if (await D.Members.getByEmail(email)) return err('Člen s tímto e-mailem už je registrovaný — přihlaste se.');
+  // Prevence duplicit: pokud email existuje v členské evidenci (public.members),
+  // NEZAKLÁDÁME nový záznam — člen je už v evidenci, přihlásí se přes login flow.
+  const evExisting = await S.findByEmail(email).catch(() => null);
+  if (evExisting) {
+    return err('Tento e-mail už je veden v členské evidenci spolku — přihlaste se.');
+  }
 
   const guardianRequired = !!type.requires_guardian || age < 18;
   if (guardianRequired) {
@@ -271,6 +277,9 @@ router.get('/config', asyncRoute(async (req, res) => {
 // Člen z evidence se při prvním přihlášení doimportuje a pokračuje standardním
 // flow (souhlasy → platba). Údaje zákonného zástupce z evidence se převezmou.
 async function importFromRegistry(row) {
+  // Idempotence: už existuje člen s tímto e-mailem → vrátit ho, nevytvářet duplicitu.
+  const existing = await D.Members.getByEmail(row.mail);
+  if (existing) return existing;
   const age = ageFrom(row.born);
   const guardianOk = !!(row.name_parents && row.mail_parents);
   return {
@@ -1081,6 +1090,7 @@ router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, re
       firstName: m.first_name,
       lastName: m.last_name,
       birthDate: m.birth_date,
+      age: m.birth_date ? ageFrom(m.birth_date) : null,  // automatický výpočet věku
       email: m.email,
       phone: m.phone,
       street: m.street,
@@ -1119,6 +1129,37 @@ router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, re
 router.get('/superadmin/evidence', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const ev = await S.listEvidenceMembers();
   res.json(ev);
+}));
+
+// ---------- Admin: změna typu členství (řádné/sportovní) člena evidence ----------
+// Pouze vlastník (superadmin). PATCH do public.members dle id_cus — nikdy
+// nepřepisuje ostatní údaje evidence (adresa, platnost, role…).
+router.patch('/superadmin/evidence/:idCus/membership-kind', A.requireSuperAdmin, asyncRoute(async (req, res) => {
+  const idCus = Number(req.params.idCus);
+  const kind = String((req.body && req.body.kind) || '');
+  if (!Number.isInteger(idCus) || idCus <= 0) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Neplatné ID člena evidence.' });
+  }
+  if (!['radne', 'sportovni'].includes(kind)) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Typ členství musí být „řádné" (radne) nebo „sportovní" (sportovni).' });
+  }
+  if (!S._cfg.url || !S._cfg.serviceKey) {
+    return res.status(400).json({ error: 'EVIDENCE_OFF', message: 'Členská evidence není nakonfigurována (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY).' });
+  }
+  const resp = await fetch(`${S._cfg.url}/rest/v1/members?id_cus=eq.${idCus}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: S._cfg.serviceKey,
+      Authorization: `Bearer ${S._cfg.serviceKey}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({ membership_kind: kind }),
+  });
+  if (!resp.ok) {
+    return res.status(502).json({ error: 'EVIDENCE_CHYBA', message: `Evidence vrátila HTTP ${resp.status} — změna se neuložila.` });
+  }
+  res.json({ ok: true, idCus, kind });
 }));
 
 // ---------- Admin: konfigurace evidence (režim sync, URL — bez klíče) ----------

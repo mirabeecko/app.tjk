@@ -23,6 +23,7 @@ const API = {
   },
   get: (path) => API.request('GET', path),
   post: (path, body) => API.request('POST', path, body || {}),
+  patch: (path, body) => API.request('PATCH', path, body || {}),
   delete: (path) => API.request('DELETE', path),
 };
 

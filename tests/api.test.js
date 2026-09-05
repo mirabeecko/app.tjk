@@ -312,6 +312,15 @@ async function main() {
 
   const saMembers = await api('GET', '/api/superadmin/members');
   check('Superadmin: přehled členů', saMembers.total >= 1 && saMembers.members.length >= 1, `${saMembers.total} členů`);
+  // věk se počítá automaticky z data narození
+  const adultWithAge = saMembers.members.find((m) => m.id === adultId);
+  check('Superadmin: automatický výpočet věku', adultWithAge && typeof adultWithAge.age === 'number' && adultWithAge.age >= 30, JSON.stringify({ age: adultWithAge && adultWithAge.age }));
+
+  // ---------- PŘEVENCE DUPLICIT: registrace s e-mailem už v lokální DB ----------
+  const dupReg = await api('POST', '/api/register', { firstName: 'Dup', lastName: 'Test', birthDate: '1990-01-01', street: 'A 1', city: 'K', zip: '417 41', email: 'dospely-test-dup@test.cz', photo: TEST_PHOTO });
+  const dupReg2 = await api('POST', '/api/register', { firstName: 'Dup', lastName: 'Test', birthDate: '1990-01-01', street: 'A 1', city: 'K', zip: '417 41', email: 'dospely-test-dup@test.cz', photo: TEST_PHOTO });
+  check('Prevence duplicit: 2. registrace stejného e-mailu → zamítnuta VALIDACE', dupReg2.error === 'VALIDACE' && /už je registrovaný/.test(dupReg2.message || ''), JSON.stringify(dupReg2));
+  await reloginSuperAdmin(); // registrace dupReg přepsala cookie na člena — zpět na superadmina
 
   // Čtení evidence IS ČUS (public.members) — superadmin. Test běží v test režimu,
   // kde SUPABASE_SYNC je off → evidence se nemusí načíst; neočekáváme selhání celého

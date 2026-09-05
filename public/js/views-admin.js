@@ -282,6 +282,17 @@ async function viewSuperAdmin() {
 
   // Evidence IS ČUS (public.members) — celá členská evidence spolku.
   const ev = data.evidence && data.evidence.ok ? data.evidence.members : [];
+  const KIND_LABEL = { radne: 'řádné', sportovni: 'sportovní' };
+  const isAdult = (born) => {
+    if (!born) return false;
+    const b = new Date(String(born).slice(0, 10) + 'T00:00:00');
+    if (isNaN(b.getTime())) return false;
+    const now = new Date();
+    let age = now.getFullYear() - b.getFullYear();
+    if (now.getMonth() < b.getMonth() || (now.getMonth() === b.getMonth() && now.getDate() < b.getDate())) age--;
+    return age >= 18;
+  };
+  const oddily = Array.from(new Set(ev.map((m) => m.oddil).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'cs'));
   const evCard = el('div', { class: 'card' }, [
     el('h3', {}, [ico('db', 17), ' ', 'Evidence členů (Supabase / public.members)']),
     el('p', { class: 'muted small', text: 'Všech ' + ev.length + ' členů z členské evidence TJ Krupka (IS ČUS). Údaje čtené přímo z Supabase tabulky members. (Její zobrazení i čtení je dostupné pouze vám.)' }),
@@ -289,24 +300,73 @@ async function viewSuperAdmin() {
   if (data.evidence && !data.evidence.ok) {
     evCard.append(el('div', { class: 'alert warn', text: 'Evidenci se nepodařilo načíst (' + (data.evidence.error || 'neznámá chyba') + '). Zkontrolujte SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.' }));
   } else if (ev.length) {
+    // ── filtry: oddíl + pouze dospělí (18+) ─────────────────────────
+    const oddilSel = el('select', { style: 'max-width:220px' }, [el('option', { value: '', text: 'Všechny oddíly' })]);
+    for (const o of oddily) oddilSel.append(el('option', { value: o, text: o }));
+    const adultChk = el('input', { type: 'checkbox' });
+    const countEl = el('span', { class: 'muted small', style: 'margin-left:auto' });
+    const filterBar = el('div', { class: 'row-gap', style: 'flex-wrap:wrap;align-items:center;margin:10px 0 4px' }, [
+      el('label', { class: 'small muted', text: 'Oddíl:' }), oddilSel,
+      el('label', { style: 'display:flex;align-items:center;gap:6px;margin:0 0 0 16px;text-transform:none;font-weight:600;font-size:.78rem' }, [adultChk, ' pouze dospělí (18+)']),
+      countEl,
+    ]);
     const evt = el('table', {}, [
-      el('thead', {}, [el('tr', {}, ['ID', 'Jméno', 'E-mail', 'Telefon', 'Oddíl', 'Od', 'Do'].map((h) => el('th', { text: h })))]),
+      el('thead', {}, [el('tr', {}, ['ID', 'Jméno', 'E-mail', 'Telefon', 'Oddíl', 'Typ členství', 'Od', 'Do'].map((h) => el('th', { text: h })))]),
       el('tbody'),
     ]);
     const evBody = $('tbody', evt);
-    for (const m of ev) {
-      const tr = el('tr', {}, [
-        el('td', { class: 'mono', text: String(m.idCus) }),
-        el('td', {}, [el('strong', { text: m.fullName })]),
-        el('td', { text: m.email || '—' }),
-        el('td', { text: m.phone || '—' }),
-        el('td', { text: m.oddil || '—' }),
-        el('td', { class: 'mono', text: fmtDate(m.memberFrom) }),
-        el('td', { class: 'mono', text: fmtDate(m.memberTo) }),
-      ]);
-      evBody.append(tr);
-    }
-    evCard.append(evt);
+
+    // Typ členství člena evidence: řádné | sportovní (změna se ukládá rovnou do Supabase)
+    const kindSelect = (m) => {
+      const cur = m.membershipKind === 'sportovni' ? 'sportovni' : 'radne';
+      const sel = el('select', { style: 'font-size:12px;padding:2px 6px;border-radius:6px', title: 'Typ členství — řádné (člen s právy) / sportovní (nový člen, výchozí)' });
+      for (const k of ['radne', 'sportovni']) sel.append(el('option', { value: k, text: KIND_LABEL[k] }));
+      sel.value = cur;
+      if (!m.idCus) { sel.disabled = true; return sel; }
+      sel.addEventListener('change', async () => {
+        sel.disabled = true;
+        const kind = sel.value;
+        try {
+          await API.patch('/superadmin/evidence/' + m.idCus + '/membership-kind', { kind });
+          m.membershipKind = kind;
+          toast('Typ členství uložen: ' + KIND_LABEL[kind]);
+        } catch (err) {
+          sel.value = m.membershipKind === 'sportovni' ? 'sportovni' : 'radne';
+          toast(err.message, true);
+        } finally { sel.disabled = false; }
+      });
+      return sel;
+    };
+
+    const renderEvidence = () => {
+      const fOddil = oddilSel.value || '';
+      const fAdult = adultChk.checked;
+      const rows = ev.filter((m) => {
+        if (fOddil && (m.oddil || '') !== fOddil) return false;
+        if (fAdult && !isAdult(m.born)) return false;
+        return true;
+      });
+      evBody.innerHTML = '';
+      for (const m of rows) {
+        const tr = el('tr', {}, [
+          el('td', { class: 'mono', text: String(m.idCus) }),
+          el('td', {}, [el('strong', { text: m.fullName })]),
+          el('td', { text: m.email || '—' }),
+          el('td', { text: m.phone || '—' }),
+          el('td', { text: m.oddil || '—' }),
+          el('td', {}, [kindSelect(m)]),
+          el('td', { class: 'mono', text: fmtDate(m.memberFrom) }),
+          el('td', { class: 'mono', text: fmtDate(m.memberTo) }),
+        ]);
+        evBody.append(tr);
+      }
+      countEl.textContent = `Zobrazeno ${rows.length} z ${ev.length} členů`;
+    };
+    oddilSel.addEventListener('change', renderEvidence);
+    adultChk.addEventListener('change', renderEvidence);
+    renderEvidence();
+
+    evCard.append(filterBar, evt);
   } else {
     evCard.append(el('p', { class: 'muted', text: 'Evidence neobsahuje žádné členy.' }));
   }
@@ -341,7 +401,7 @@ async function viewSuperAdmin() {
   membersCard.append(qrPanel);
 
   const mt = el('table', {}, [
-    el('thead', {}, [el('tr', {}, ['ID', 'Jméno', 'E-mail', 'Typ členství', 'Role', 'Status', 'Platnost'].map((h) => el('th', { text: h })))]),
+    el('thead', {}, [el('tr', {}, ['ID', 'Jméno', 'Věk', 'E-mail', 'Typ členství', 'Role', 'Status', 'Platnost'].map((h) => el('th', { text: h })))]),
     el('tbody'),
   ]);
   const mbody = $('tbody', mt);
@@ -349,6 +409,7 @@ async function viewSuperAdmin() {
     const tr = el('tr', { style: 'cursor:pointer', class: 'sa-member-row' }, [
       el('td', { class: 'mono', text: m.id.slice(0, 8) }),
       el('td', { text: m.name }),
+      el('td', { class: 'small', text: m.age != null ? `${m.age} let` : '—' }),
       el('td', { class: 'small', text: m.email }),
       el('td', { text: m.membershipLabel }),
       el('td', {}, [el('span', { class: `tag ${m.role === 'superadmin' ? 'warn' : m.role === 'dozor' || m.role === 'vybor' ? 'blue' : 'gray'}`, text: m.role })]),

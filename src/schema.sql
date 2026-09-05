@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS members (
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_members_email ON members (lower(email));
 
 -- Verzované právní dokumenty (provozní řád, GDPR, ...)
 CREATE TABLE IF NOT EXISTS doc_versions (

@@ -232,7 +232,7 @@ create trigger members_touch before update on app.members
   for each row execute function app.touch_updated_at();
 
 -- Indexy pro časté dotazy
-create index if not exists idx_members_email on app.members (lower(email));
+create unique index if not exists idx_members_email on app.members (lower(email));
 create index if not exists idx_members_guardian_token on app.members (guardian_token);
 create index if not exists idx_consents_member on app.consents (member_id);
 create index if not exists idx_payments_member on app.payments (member_id);

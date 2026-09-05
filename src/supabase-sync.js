@@ -155,15 +155,18 @@ async function upsertMember(member) {
     log('UPDATE', member.email);
     return { ok: true, action: 'update', member: member.email };
   }
+  // NOVÝ člen evidence → vždy „sportovní" (sportovni). Řádné (radne) se v PATCHu
+  // nikdy neposílá, aby se nepřepsalo řádné členství nastavené ručně v evidenci.
+  const insertRow = { ...row, membership_kind: 'sportovni' };
   const resp = await fetch(`${cfg.url}/rest/v1/members`, {
-    method: 'POST', headers, body: JSON.stringify(row),
+    method: 'POST', headers, body: JSON.stringify(insertRow),
   });
   if (!resp.ok) {
     // id_cus je NOT NULL bez auto-generování — při selhání zkusíme INSERT s max+1
     const idCus = await nextIdCus();
     if (idCus === null) return { ok: false, action: 'insert', member: member.email, error: resp.status };
     const resp2 = await fetch(`${cfg.url}/rest/v1/members`, {
-      method: 'POST', headers, body: JSON.stringify({ ...row, id_cus: idCus }),
+      method: 'POST', headers, body: JSON.stringify({ ...insertRow, id_cus: idCus }),
     });
     if (!resp2.ok) {
       log('INSERT CHYBA', `${member.email} ${resp2.status} ${(await resp2.text()).slice(0, 160)}`);
@@ -201,6 +204,7 @@ async function listEvidenceMembers() {
     zip: m.zip || m.ZIP_CODE || null,
     role: m.role,
     oddil: m.oddil || null,
+    membershipKind: m.membership_kind || 'radne', // řádné | sportovní (řádkové typ členství)
     memberFrom: m.member_from || null,
     memberTo: m.member_to || null,
     guardianEmail: m.mail_parents || null,
