@@ -10,3 +10,17 @@ data
 scripts
 tests
 TJK-Krupka-app*
+
+# Nativní mobilní projekty (Vercel = jen web; mobilní build běží lokálně)
+android
+ios
+www
+dist
+build
+.android
+.gradle-home
+.ios-derived
+.vercel-cli
+.capacitor
+.vscode
+.idea

@@ -533,7 +533,10 @@ async function ensureServer() {
     cwd: path.join(__dirname, '..'),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
-    env: { ...process.env, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET },
+    env: { ...process.env, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
+      // TEST MODE: reálný SMTP z .env se NEPROPOUŠTÍ — testy běží se stub emaily (outbox),
+      // jinak by se přes SMTP (Resend) reálně odesílaly a zpomalovaly/lámaly testy.
+      SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '' },
   });
   serverProc.stdout.on('data', (d) => process.stdout.write('[server] ' + d));
   serverProc.stderr.on('data', (d) => process.stdout.write('[server-err] ' + d));
