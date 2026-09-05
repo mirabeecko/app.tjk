@@ -538,8 +538,11 @@ async function viewLogin() {
       gBtn.textContent = 'Přihlašuji přes Google…';
       try {
         await loadGoogleScript();
-        if (!window.google || !window.google.accounts) throw new Error('Google Identity se nenačetlo.');
-        // IdTokenProvider: zobrazí Google přihlašovací okno, vrátí id_token → pošleme na server.
+        if (!window.google || !window.google.accounts) {
+          // fallback: server přesměruje na Google (Cesta B — nevyžaduje GIS skript)
+          location.href = '/api/auth/google';
+          return;
+        }
         const client = window.google.accounts.id;
         client.initialize({
           client_id: '354181163168-p7vdibos71mu3lmciutlo5tjuqs9jd5e.apps.googleusercontent.com',
@@ -556,11 +559,12 @@ async function viewLogin() {
             gBtn.textContent = 'Pokračovat přes Google';
           },
         });
-        client.prompt(); // zobrazí Google okno (funguje i v iframe/bez popup)
+        client.prompt();
       } catch (e) {
+        // fallback na redirect, pokud GIS selže
         gBtn.disabled = false;
         gBtn.textContent = 'Pokračovat přes Google';
-        toast(e.message, true);
+        location.href = '/api/auth/google';
       }
     });
   }
