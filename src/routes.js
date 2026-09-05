@@ -8,6 +8,7 @@ const QRCode = require('qrcode');
 const D = require('./db');
 const A = require('./auth');
 const mailer = require('./mailer');
+const GAuth = require('./google-auth');
 const payments = require('./payments');
 const S = require('./supabase-sync');
 const E = require('./eligibility');
@@ -93,6 +94,7 @@ function publicMember(m) {
     phone: m.phone,
     membershipType: m.membership_type,
     membershipKind: m.membership_kind,
+    gender: m.gender,
     photo: m.photo,
     role: m.role,
     status: m.status,
@@ -154,11 +156,12 @@ async function hasAccess(m) {
 router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
   const v = validators();
   const b = req.body || {};
-  const { firstName, lastName, birthDate, street, city, zip, email, phone, photo } = b;
+  const { firstName, lastName, birthDate, street, city, zip, email, phone, photo, gender } = b;
   const guardian = b.guardian || {};
 
   const err = (msg) => res.status(400).json({ error: 'VALIDACE', message: msg });
   if (!firstName || !lastName) return err('Jméno a příjmení je povinné.');
+  if (gender && !['muz', 'zena'].includes(gender)) return err('Pohlaví musí být muž nebo žena.');
   if (!photo) return err('Fotografie je povinná.');
   // foto = base64 data-URL obrázku (data:image/...;base64,...)
   if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(photo)) {
@@ -206,6 +209,7 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
     street, city, zip, email: email, phone: phone || '',
     membershipType,
     membershipKind: 'sportovni',   // nový člen získá automaticky sportovní členství
+    gender,
     photo,
     status: 'registered',
     guardianName: guardianRequired ? guardian.name : null,
@@ -346,10 +350,85 @@ router.post('/login/:token', asyncRoute(async (req, res) => {
   res.json({ ok: true, member: publicMember(member) });
 }));
 
+// Najde nebo vytvoří člena podle ověřeného Googlu e-mailu a nastaví session.
+// E-mail z Google je ověřený → identita člena. Neznámý email = registrace,
+// známý = přihlášení. Nikdy nevytváří duplicitní záznam (getByEmail + unikátní index).
+async function finishGoogleLogin(payload, res) {
+  if (!payload) return res.status(401).json({ error: 'GOOGLE_NEPLATNY', message: 'Ověření Google se nezdařilo.' });
+  const email = payload.email;
+  if (!email) return res.status(400).json({ error: 'GOOGLE_EMAIL', message: 'Google nevrátil e-mail.' });
+  let member = await D.Members.getByEmail(email);
+  let created = false;
+  if (!member) {
+    // registroce Googlem — člen se zakládá jako sportovní, čeká na schválení admina
+    const age = 18; // bez data narození od Googlu; kategorie se dopočítá při doplnění
+    member = await D.Members.create({
+      memberNo: await D.Members.nextMemberNo(),
+      firstName: (payload.givenName || payload.name || email.split('@')[0]),
+      lastName: payload.familyName || '',
+      birthDate: null,
+      street: '', city: '', zip: '',
+      email,
+      phone: '',
+      membershipType: 'dospele',
+      membershipKind: 'sportovni',
+      status: 'registered',
+      guardianName: null, guardianRelation: null, guardianEmail: null, guardianPhone: null,
+      guardianToken: null, guardianTokenExpires: null, guardianStatus: 'not_required',
+      validFrom: null, validUntil: null,
+      // foto není k dispozici — nastaví se / doplní později; povinná foto je jen u ruční registrace
+    });
+    created = true;
+  }
+  const token = await D.Sessions.create(member.id, member.role);
+  A.setSessionCookie(res, token);
+  res.json({ ok: true, created, member: publicMember(member), status: effectiveStatus(member) });
+}
+
+// Google login/registrace — variant A: klient pošle ID token z Google Sign-In
+router.post('/auth/google', asyncRoute(async (req, res) => {
+  const { idToken } = req.body || {};
+  const payload = await GAuth.verifyIdToken(idToken);
+  return finishGoogleLogin(payload, res);
+}));
+
+// Google — variant B: auth code flow (redirect na Google)
+router.get('/auth/google', asyncRoute(async (req, res) => {
+  const url = GAuth.getAuthUrl();
+  if (!url) return res.status(503).json({ error: 'GOOGLE_NENAKONFIGUROVAN', message: 'Google přihlášení není nakonfigurováno.' });
+  res.redirect(url);
+}));
+
+// Google — callback po úspěšném přihlášení (auth code flow)
+router.get('/auth/google/callback', asyncRoute(async (req, res) => {
+  const code = req.query.code;
+  const payload = await GAuth.verifyAuthCode(code);
+  // callback se zpracovává v prohlížeči — nastavíme session a přesměrujeme do appky
+  if (!payload) return res.status(401).send('Ověření Google se nezdařilo. Zavřete okno a zkuste to znovu.');
+  // vytvoříme member + session, ale cookie musíme nastavit na odpověď a přesměrovat
+  await (async () => {
+    const email = payload.email;
+    let member = await D.Members.getByEmail(email);
+    if (!member) member = await D.Members.create({
+      memberNo: await D.Members.nextMemberNo(),
+      firstName: payload.givenName || payload.name || email.split('@')[0],
+      lastName: payload.familyName || '',
+      birthDate: null, street: '', city: '', zip: '',
+      email, phone: '',
+      membershipType: 'dospele', membershipKind: 'sportovni', status: 'registered',
+      guardianName: null, guardianRelation: null, guardianEmail: null, guardianPhone: null,
+      guardianToken: null, guardianTokenExpires: null, guardianStatus: 'not_required',
+      validFrom: null, validUntil: null,
+    });
+    const token = await D.Sessions.create(member.id, member.role);
+    A.setSessionCookie(res, token);
+  })();
+  res.redirect('/#/profil');
+}));
+
 router.post('/logout', asyncRoute(async (req, res) => {
   const token = A.parseCookies(req)[A.COOKIE];
-  if (token) await D.Sessions.delete(token);
-  A.clearSessionCookie(res);
+  if (token) await D.Sessions.delete(token);  A.clearSessionCookie(res);
   res.json({ ok: true });
 }));
 
@@ -1114,12 +1193,29 @@ router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, re
       updatedAt: m.updated_at,
     });
   }
+  // ---------- Grafy: složení členů (řádní/sportovní, 18+, muži/ženy/děti) ----------
+  const comp = {
+    kind: { sportovni: 0, radne: 0 },
+    adult: 0, minor: 0,
+    gender: { muz: 0, zena: 0, bez_udaje: 0, dite: 0 },
+  };
+  for (const m of rows) {
+    const kind = m.membership_kind === 'radne' ? 'radne' : 'sportovni';
+    comp.kind[kind] = (comp.kind[kind] || 0) + 1;
+    const age = m.birth_date ? ageFrom(m.birth_date) : null;
+    if (age !== null && age < 18) comp.minor++;
+    else comp.adult++;
+    if (age !== null && age < 18) {
+      comp.gender.dite++;
+    } else {
+      const g = m.gender === 'muz' ? 'muz' : m.gender === 'zena' ? 'zena' : 'bez_udaje';
+      comp.gender[g]++;
+    }
+  }
   res.json({
     total: rows.length,
     members: rows,
-    // ✅ Evidence IS ČUS (public.members) — celá členská evidence spolku.
-    // Neuvádí žádný service role key; při chybě propaguje (ok:false), ale
-    // neshodí admin pohled — evidence se napojí samostatně.
+    composition: comp,
     evidence: ev,
     evidenceCount: ev && ev.ok ? ev.members.length : 0,
   });

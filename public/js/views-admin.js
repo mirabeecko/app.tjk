@@ -230,6 +230,42 @@ async function viewSuperAdmin() {
   ]);
   root.append(statCard);
 
+  // ---------- GRAFY: složení členů ----------
+  const comp = data.composition || { kind: {}, adult: 0, minor: 0, gender: {} };
+  const compTotal = members.length || 1;
+  const bar = (label, val, color, pct) => el('div', { class: 'comp-row' }, [
+    el('div', { class: 'comp-label' }, [el('span', { text: label }), el('strong', { text: String(val) })]),
+    el('div', { class: 'comp-track' }, [el('div', { class: 'comp-fill', style: `width:${pct}%; background:${color}` })]),
+  ]);
+  const pctOf = (v) => Math.round(((v || 0) / compTotal) * 100);
+  const compKind = [
+    ['Sportovní', comp.kind.sportovni || 0, 'var(--green-500)', pctOf(comp.kind.sportovni)],
+    ['Řádné', comp.kind.radne || 0, 'var(--blue-600)', pctOf(comp.kind.radne)],
+  ];
+  const compGender = [
+    ['Muži (18+)', comp.gender.muz || 0, 'var(--blue-600)', pctOf(comp.gender.muz)],
+    ['Ženy (18+)', comp.gender.zena || 0, 'var(--green-500)', pctOf(comp.gender.zena)],
+    ['Děti (do 18)', comp.gender.dite || 0, 'var(--danger)', pctOf(comp.gender.dite)],
+  ];
+  const chartsCard = el('div', { class: 'card' }, [
+    el('h3', {}, [ico('chart', 17), ' ', 'Složení členů']),
+    el('p', { class: 'muted small', text: 'Vyplývá z registrovaných členů aplikace (' + members.length + ').' }),
+    el('div', { class: 'comp-group' }, [
+      el('h4', { class: 'comp-title', text: 'Členství' }),
+      ...compKind.map(([l, v, c, p]) => bar(l, v, c, p)),
+    ]),
+    el('div', { class: 'comp-group' }, [
+      el('h4', { class: 'comp-title', text: 'Věk (18+)' }),
+      bar('Dospělí (18+)', comp.adult || 0, 'var(--green-600)', pctOf(comp.adult)),
+      bar('Mladiství (<18)', comp.minor || 0, 'var(--danger)', pctOf(comp.minor)),
+    ]),
+    el('div', { class: 'comp-group' }, [
+      el('h4', { class: 'comp-title', text: 'Muži / ženy / děti' }),
+      ...compGender.map(([l, v, c, p]) => bar(l, v, c, p)),
+    ]),
+  ]);
+  root.append(chartsCard);
+
   // typy členství
   const typesCard = el('div', { class: 'card' }, [el('h3', { text: 'Typy členství' })]);
   const tt = el('table', {}, [

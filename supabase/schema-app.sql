@@ -44,6 +44,7 @@ create table if not exists app.members (
   phone              text not null default '',
   membership_type    text not null references app.member_types(code),
   membership_kind    text not null default 'sportovni',  -- sportovni | radne (nový člen = sportovní)
+  gender             text,               -- muz | zena | null (pro statistiky složení)
   photo              text,               -- base64 data-URL (povinné při registraci)
   role               text not null default 'member',   -- member | dozor | vybor | superadmin
   status             text not null default 'registered',

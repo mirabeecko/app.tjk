@@ -315,6 +315,9 @@ async function main() {
   // věk se počítá automaticky z data narození
   const adultWithAge = saMembers.members.find((m) => m.id === adultId);
   check('Superadmin: automatický výpočet věku', adultWithAge && typeof adultWithAge.age === 'number' && adultWithAge.age >= 30, JSON.stringify({ age: adultWithAge && adultWithAge.age }));
+  // grafy: kompozice členů
+  const comp = saMembers.composition || {};
+  check('Superadmin: kompozice (sportovní/řádné + 18+ + muži/ženy/děti)', comp.kind && comp.gender && typeof comp.adult === 'number' && (comp.kind.sportovni || 0) >= 1, JSON.stringify(comp));
 
   // ---------- PŘEVENCE DUPLICIT: registrace s e-mailem už v lokální DB ----------
   const dupReg = await api('POST', '/api/register', { firstName: 'Dup', lastName: 'Test', birthDate: '1990-01-01', street: 'A 1', city: 'K', zip: '417 41', email: 'dospely-test-dup@test.cz', photo: TEST_PHOTO });

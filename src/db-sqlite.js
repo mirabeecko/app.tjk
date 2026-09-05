@@ -70,6 +70,7 @@ const Members = {
       role: 'member',
       status: data.status || 'registered',
       membershipKind: data.membershipKind || 'sportovni',
+      gender: data.gender ?? null,
       photo: data.photo ?? null,
       guardianName: data.guardianName ?? null,
       guardianRelation: data.guardianRelation ?? null,
@@ -85,11 +86,11 @@ const Members = {
     };
     db.prepare(
       `INSERT INTO members (id, member_no, first_name, last_name, birth_date, street, city, zip,
-        email, phone, membership_type, membership_kind, photo, role, status, guardian_name, guardian_relation,
+        email, phone, membership_type, membership_kind, gender, photo, role, status, guardian_name, guardian_relation,
         guardian_email, guardian_phone, guardian_token, guardian_token_expires, guardian_status, valid_from, valid_until,
         created_at, updated_at)
       VALUES (@id, @memberNo, @firstName, @lastName, @birthDate, @street, @city, @zip,
-        @email, @phone, @membershipType, @membershipKind, @photo, @role, @status, @guardianName, @guardianRelation,
+        @email, @phone, @membershipType, @membershipKind, @gender, @photo, @role, @status, @guardianName, @guardianRelation,
         @guardianEmail, @guardianPhone, @guardianToken, @guardianTokenExpires, @guardianStatus, @validFrom, @validUntil,
         @createdAt, @updatedAt)`
     ).run(row);

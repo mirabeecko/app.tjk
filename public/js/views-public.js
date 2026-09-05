@@ -287,6 +287,7 @@ async function viewRegister() {
         el('div', {}, [el('label', { text: 'Město' }), el('input', { type: 'text', name: 'city', required: true })]),
         el('div', {}, [el('label', { text: 'PSČ' }), el('input', { type: 'text', name: 'zip', required: true, inputmode: 'numeric' })]),
         el('div', { class: 'full' }, [el('label', { text: 'Telefon (volitelné)' }), el('input', { type: 'tel', name: 'phone' })]),
+        el('div', {}, [el('label', { text: 'Pohlaví (volitelné, pro statistiky)' }), el('select', { name: 'gender' }, ['', 'muz', 'zena'].map((o) => el('option', { value: o, text: o === '' ? '—' : o === 'muz' ? 'Muž' : 'Žena' })))]),
         el('div', { class: 'full' }, [
           el('label', { text: 'Fotografie (povinné)' }),
           el('div', { class: 'photo-upload' }, [
@@ -406,6 +407,7 @@ async function viewRegister() {
       firstName: data.firstName, lastName: data.lastName, birthDate: data.birthDate,
       street: data.street, city: data.city, zip: data.zip,
       email: data.email, phone: data.phone,
+      gender: data.gender || null,
       photo: photoData,
     };
     if (!photoData) {
@@ -514,6 +516,20 @@ async function viewLogin() {
   });
 
   card.append(form);
+
+  // Přihlášení / registrace přes Google
+  const googleBtn = el('div', { class: 'auth-google' }, [
+    el('button', { id: 'google-login-btn', class: 'btn secondary btn-block', text: 'Pokračovat přes Google' }),
+    el('div', { class: 'auth-divider', text: 'nebo' }),
+  ]);
+  card.append(googleBtn);
+  const gBtn = $('#google-login-btn');
+  if (gBtn) {
+    gBtn.addEventListener('click', () => {
+      // Varianta B (auth code flow): server přesměruje na Google
+      location.href = '/api/auth/google';
+    });
+  }
 
   const switchLink = el('p', { class: 'auth-switch' }, [
     'Ještě nejste členem? ',

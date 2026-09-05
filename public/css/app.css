@@ -745,6 +745,24 @@ tbody tr:hover { background: var(--bg-2); }
 .stat-tile .st-icon.orange { background: linear-gradient(135deg, var(--violet-400), var(--violet-600)); }
 .stat-tile .st-icon.gold { background: linear-gradient(135deg, var(--sky-400), var(--sky-600)); }
 .stat-tile .st-label { font-size: 0.6rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); display: block; }
+
+/* grafy — složení členů */
+.comp-group { margin-top: 16px; }
+.comp-title { font-size: 0.74rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); margin: 0 0 8px; }
+.comp-row { margin-bottom: 10px; }
+.comp-label { display: flex; justify-content: space-between; align-items: center; font-size: 0.88rem; margin-bottom: 4px; }
+.comp-label strong { font-variant-numeric: tabular-nums; }
+.comp-track { height: 9px; border-radius: 999px; background: var(--bg-1); border: 1px solid var(--border); overflow: hidden; }
+.comp-fill { height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease-out); }
+.comp-group + .comp-group { border-top: 1px solid var(--border); padding-top: 14px; }
+
+/* Google přihlášení */
+.auth-google { margin-top: 16px; }
+.btn-block { width: 100%; justify-content: center; }
+.auth-divider { display: flex; align-items: center; gap: 12px; margin: 14px 0; color: var(--text-2); font-size: 0.78rem; font-weight: 700; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+
 .stat-tile .st-value { font-family: var(--font-display); font-weight: 800; font-size: 1.4rem; letter-spacing: -0.02em; line-height: 1.25; color: var(--text-0); font-variant-numeric: tabular-nums; }
 
 /* superadmin */

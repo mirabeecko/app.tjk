@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS members (
   phone           TEXT NOT NULL DEFAULT '',
   membership_type TEXT NOT NULL REFERENCES member_types(code),
   membership_kind TEXT NOT NULL DEFAULT 'sportovni',  -- sportovni | radne (nový člen = sportovní)
+  gender          TEXT,                    -- muz | zena | null (pro statistiky složení)
   photo           TEXT,                    -- base64 data-URL (povinné při registraci)
   role            TEXT NOT NULL DEFAULT 'member',   -- member|dozor|vybor|superadmin (vlastník)
   status          TEXT NOT NULL DEFAULT 'registered',
