@@ -1006,6 +1006,7 @@ router.get('/facilities', asyncRoute(async (req, res) => {
 // zákonný zástupce, členství, platby, souhlasy).
 router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const all = await D.Members.listAll();
+  const ev = await S.listEvidenceMembers().catch((e) => ({ ok: false, error: e.message, members: [] }));
   const rows = [];
   for (const m of all) {
     const type = await D.MemberTypes.get(m.membership_type);
@@ -1042,7 +1043,23 @@ router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, re
   res.json({
     total: rows.length,
     members: rows,
+    // ✅ Evidence IS ČUS (public.members) — celá členská evidence spolku.
+    // Neuvádí žádný service role key; při chybě propaguje (ok:false), ale
+    // neshodí admin pohled — evidence se napojí samostatně.
+    evidence: ev,
+    evidenceCount: ev && ev.ok ? ev.members.length : 0,
   });
+}));
+
+// ---------- Admin: čtení celé evidence IS ČUS (public.members) ----------
+router.get('/superadmin/evidence', A.requireSuperAdmin, asyncRoute(async (req, res) => {
+  const ev = await S.listEvidenceMembers();
+  res.json(ev);
+}));
+
+// ---------- Admin: konfigurace evidence (režim sync, URL — bez klíče) ----------
+router.get('/superadmin/evidence-config', A.requireSuperAdmin, asyncRoute(async (req, res) => {
+  res.json(S.evidenceConfig());
 }));
 
 // Typy členství + počty členů v každém typu

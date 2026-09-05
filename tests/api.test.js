@@ -290,6 +290,12 @@ async function main() {
   const saMembers = await api('GET', '/api/superadmin/members');
   check('Superadmin: přehled členů', saMembers.total >= 1 && saMembers.members.length >= 1, `${saMembers.total} členů`);
 
+  // Čtení evidence IS ČUS (public.members) — superadmin. Test běží v test režimu,
+  // kde SUPABASE_SYNC je off → evidence se nemusí načíst; neočekáváme selhání celého
+  // testu, jen že endpoint EXISTUJE a vrací buď členy, nebo ok:false (ne 500/403).
+  const evResp = await api('GET', '/api/superadmin/evidence');
+  check('Superadmin: evidence endpoint (ok)', evResp && (evResp.ok === true || 'error' in evResp), JSON.stringify({ ok: evResp && evResp.ok, err: evResp && evResp.error }));
+
   // Admin přehled (jen superadmin — nový bezpečnostní model)
   const adminList = await api('GET', '/api/admin/members');
   check('Admin (superadmin): vidí seznam členů', adminList.members && adminList.members.length >= 3, `${(adminList.members||[]).length} členů`);

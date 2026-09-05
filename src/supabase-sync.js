@@ -176,6 +176,49 @@ async function upsertMember(member) {
   return { ok: true, action: 'insert', member: member.email };
 }
 
+// Načte CELOU členskou evidenci (public.members) pro admina.
+// Vrací libovolně zformátované řádky (jméno, kontakt, platnost členství…).
+async function listEvidenceMembers() {
+  if (!cfg.url || !cfg.serviceKey) return { ok: false, error: 'evidence_nenakonfigurovana', members: [] };
+  if (cfg.mode === 'off' && !cfg.url) return { ok: false, error: 'off', members: [] };
+  const url = `${cfg.url}/rest/v1/members?select=*&order=surname.asc`;
+  const resp = await fetch(url, { headers: apiHeaders() });
+  if (!resp.ok) {
+    log('listEvidenceMembers CHYBA', `${resp.status} ${(await resp.text()).slice(0, 140)}`);
+    return { ok: false, error: `http_${resp.status}`, members: [] };
+  }
+  const rows = await resp.json();
+  const members = (Array.isArray(rows) ? rows : []).map((m) => ({
+    idCus: m.id_cus,
+    name: m.name || null,
+    surname: m.surname || null,
+    fullName: `${m.name || ''} ${m.surname || ''}`.trim(),
+    born: m.born || null,
+    email: m.mail || m['e-mail'] || null,
+    phone: m.phone || null,
+    street: m.street || null,
+    city: m.city || null,
+    zip: m.zip || m.ZIP_CODE || null,
+    role: m.role,
+    oddil: m.oddil || null,
+    memberFrom: m.member_from || null,
+    memberTo: m.member_to || null,
+    guardianEmail: m.mail_parents || null,
+    guardianName: m.name_parents || null,
+    guardianRelation: m.vztah || null,
+  }));
+  return { ok: true, members };
+}
+
+// Konfigurace evidence pro UI (sync status): URL + režim (service key se NIKDY nevrací).
+function evidenceConfig() {
+  return {
+    url: cfg.url,
+    mode: cfg.mode,
+    enabled: enabled(),
+  };
+}
+
 // Hromadný upsert všech členů (superadmin tlačítko).
 async function syncAll(members) {
   if (cfg.mode === 'off' || !cfg.url) return { ok: true, synced: 0, mode: cfg.mode, reason: 'off' };
@@ -185,4 +228,4 @@ async function syncAll(members) {
   return { ok: ok === results.length, synced: ok, total: results.length, mode: cfg.mode };
 }
 
-module.exports = { enabled, mode, upsertMember, syncAll, findByEmail, fetchFull, toRow, _cfg: cfg };
+module.exports = { enabled, mode, upsertMember, syncAll, findByEmail, fetchFull, toRow, listEvidenceMembers, evidenceConfig, _cfg: cfg };

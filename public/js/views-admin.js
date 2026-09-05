@@ -274,6 +274,38 @@ async function viewSuperAdmin() {
   ]);
   root.append(syncCard);
 
+  // Evidence IS ČUS (public.members) — celá členská evidence spolku.
+  const ev = data.evidence && data.evidence.ok ? data.evidence.members : [];
+  const evCard = el('div', { class: 'card' }, [
+    el('h3', {}, [ico('db', 17), ' ', 'Evidence členů (Supabase / public.members)']),
+    el('p', { class: 'muted small', text: 'Všech ' + ev.length + ' členů z členské evidence TJ Krupka (IS ČUS). Údaje čtené přímo z Supabase tabulky members. (Její zobrazení i čtení je dostupné pouze vám.)' }),
+  ]);
+  if (data.evidence && !data.evidence.ok) {
+    evCard.append(el('div', { class: 'alert warn', text: 'Evidenci se nepodařilo načíst (' + (data.evidence.error || 'neznámá chyba') + '). Zkontrolujte SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.' }));
+  } else if (ev.length) {
+    const evt = el('table', {}, [
+      el('thead', {}, [el('tr', {}, ['ID', 'Jméno', 'E-mail', 'Telefon', 'Oddíl', 'Od', 'Do'].map((h) => el('th', { text: h })))]),
+      el('tbody'),
+    ]);
+    const evBody = $('tbody', evt);
+    for (const m of ev) {
+      const tr = el('tr', {}, [
+        el('td', { class: 'mono', text: String(m.idCus) }),
+        el('td', {}, [el('strong', { text: m.fullName })]),
+        el('td', { text: m.email || '—' }),
+        el('td', { text: m.phone || '—' }),
+        el('td', { text: m.oddil || '—' }),
+        el('td', { class: 'mono', text: fmtDate(m.memberFrom) }),
+        el('td', { class: 'mono', text: fmtDate(m.memberTo) }),
+      ]);
+      evBody.append(tr);
+    }
+    evCard.append(evt);
+  } else {
+    evCard.append(el('p', { class: 'muted', text: 'Evidence neobsahuje žádné členy.' }));
+  }
+  root.append(evCard);
+
   API.get('/superadmin/sync-status').then((s) => {
     const st = $('#sa-sync-status');
     if (!st) return;
