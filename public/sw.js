@@ -1,17 +1,17 @@
 // sw.js — Service Worker: app shell cache + offline režim pro členskou kartu a provozní řád.
 'use strict';
 
-const CACHE = 'airbag-v26';
+const CACHE = 'airbag-v28';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/app.css?v=26',
-  '/js/api.js',
-  '/js/ui.js',
-  '/js/views-public.js',
-  '/js/views-member.js',
-  '/js/views-admin.js',
-  '/js/app.js',
+  '/css/app.css?v=28',
+  '/js/api.js?v=28',
+  '/js/ui.js?v=28',
+  '/js/views-public.js?v=28',
+  '/js/views-member.js?v=28',
+  '/js/views-admin.js?v=28',
+  '/js/app.js?v=28',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
