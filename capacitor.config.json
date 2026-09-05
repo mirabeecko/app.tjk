@@ -1,5 +1,12 @@
 {
   "appId": "cz.tjkrupka.app",
   "appName": "TJ Krupka",
-  "webDir": "www"
+  "webDir": "www",
+  "server": {
+    "url": "https://app.tjkrupka.cz",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
 }
