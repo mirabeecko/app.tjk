@@ -511,17 +511,57 @@ async function viewLogin() {
 
   card.append(form);
 
-  // Přihlášení / registrace přes Google
+  // Přihlášení / registrace přes Google (Cesta A: ID token z Google Identity Services)
   const googleBtn = el('div', { class: 'auth-google' }, [
     el('button', { id: 'google-login-btn', class: 'btn secondary btn-block', text: 'Pokračovat přes Google' }),
     el('div', { class: 'auth-divider', text: 'nebo' }),
   ]);
   card.append(googleBtn);
+
+  // Načti Google Identity Services (GIS) — skript z accounts.google.com (povoleno v CSP).
+  function loadGoogleScript() {
+    return new Promise((resolve) => {
+      if (window.google && window.google.accounts) return resolve();
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.defer = true;
+      s.onload = () => resolve();
+      s.onerror = () => resolve();
+      document.head.appendChild(s);
+    });
+  }
   const gBtn = $('#google-login-btn');
   if (gBtn) {
-    gBtn.addEventListener('click', () => {
-      // Varianta B (auth code flow): server přesměruje na Google
-      location.href = '/api/auth/google';
+    gBtn.addEventListener('click', async () => {
+      gBtn.disabled = true;
+      gBtn.textContent = 'Přihlašuji přes Google…';
+      try {
+        await loadGoogleScript();
+        if (!window.google || !window.google.accounts) throw new Error('Google Identity se nenačetlo.');
+        // IdTokenProvider: zobrazí Google přihlašovací okno, vrátí id_token → pošleme na server.
+        const client = window.google.accounts.id;
+        client.initialize({
+          client_id: '354181163168-p7vdibos71mu3lmciutlo5tjuqs9jd5e.apps.googleusercontent.com',
+          callback: async (resp) => {
+            try {
+              const r = await API.post('/auth/google', { idToken: resp.credential });
+              await refreshMe();
+              toast(r.created ? 'Registrace Googlem proběhla' : 'Přihlášeno Googlem');
+              location.hash = '#/';
+            } catch (e) {
+              toast(e.message, true);
+            }
+            gBtn.disabled = false;
+            gBtn.textContent = 'Pokračovat přes Google';
+          },
+        });
+        client.prompt(); // zobrazí Google okno (funguje i v iframe/bez popup)
+      } catch (e) {
+        gBtn.disabled = false;
+        gBtn.textContent = 'Pokračovat přes Google';
+        toast(e.message, true);
+      }
     });
   }
 
