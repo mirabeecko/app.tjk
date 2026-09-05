@@ -13,6 +13,10 @@ const SHELL = [
   '/js/views-admin.js?v=29',
   '/js/app.js?v=29',
   '/manifest.json',
+  '/favicon.ico',
+  '/favicon-16.png',
+  '/favicon-32.png',
+  '/apple-touch-icon.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
 ];
