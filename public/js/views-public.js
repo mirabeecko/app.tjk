@@ -480,7 +480,9 @@ async function viewLogin() {
   const form = el('form', { id: 'login-form' }, [
     el('label', { text: 'E-mail' }),
     el('input', { type: 'email', name: 'email', required: true, autocomplete: 'email', placeholder: 'vas@email.cz' }),
-    el('button', { class: 'btn', type: 'submit', text: 'Poslat odkaz k přihlášení' }),
+    el('label', { text: 'Heslo' }),
+    el('input', { type: 'password', name: 'password', required: true, autocomplete: 'current-password', placeholder: '••••••••' }),
+    el('button', { class: 'btn', type: 'submit', text: 'Přihlásit se' }),
   ]);
 
   const showSent = (devMessageId) => {
@@ -498,76 +500,21 @@ async function viewLogin() {
     const data = readForm(form);
     const btn = $('button[type="submit"]', form);
     btn.disabled = true;
-    btn.textContent = 'Odesílám…';
+    btn.textContent = 'Přihlašuji…';
     try {
-      const res = await API.post('/login', { email: data.email });
-      showSent(res.devMessageId);
+      const res = await API.post('/login/password', { email: data.email, password: data.password });
+      await refreshMe();
+      toast('Přihlášeno');
+      location.hash = '#/';
     } catch (err) {
       btn.disabled = false;
-      btn.textContent = 'Poslat odkaz k přihlášení';
+      btn.textContent = 'Přihlásit se';
       toast(err.message, true);
     }
   });
 
   card.append(form);
-
-  // Přihlášení / registrace přes Google (Cesta A: ID token z Google Identity Services)
-  const googleBtn = el('div', { class: 'auth-google' }, [
-    el('button', { id: 'google-login-btn', class: 'btn secondary btn-block', text: 'Pokračovat přes Google' }),
-    el('div', { class: 'auth-divider', text: 'nebo' }),
-  ]);
-  card.append(googleBtn);
-
-  // Načti Google Identity Services (GIS) — skript z accounts.google.com (povoleno v CSP).
-  function loadGoogleScript() {
-    return new Promise((resolve) => {
-      if (window.google && window.google.accounts) return resolve();
-      const s = document.createElement('script');
-      s.src = 'https://accounts.google.com/gsi/client';
-      s.async = true;
-      s.defer = true;
-      s.onload = () => resolve();
-      s.onerror = () => resolve();
-      document.head.appendChild(s);
-    });
-  }
-  const gBtn = $('#google-login-btn');
-  if (gBtn) {
-    gBtn.addEventListener('click', async () => {
-      gBtn.disabled = true;
-      gBtn.textContent = 'Přihlašuji přes Google…';
-      try {
-        await loadGoogleScript();
-        if (!window.google || !window.google.accounts) {
-          // fallback: server přesměruje na Google (Cesta B — nevyžaduje GIS skript)
-          location.href = '/api/auth/google';
-          return;
-        }
-        const client = window.google.accounts.id;
-        client.initialize({
-          client_id: '354181163168-p7vdibos71mu3lmciutlo5tjuqs9jd5e.apps.googleusercontent.com',
-          callback: async (resp) => {
-            try {
-              const r = await API.post('/auth/google', { idToken: resp.credential });
-              await refreshMe();
-              toast(r.created ? 'Registrace Googlem proběhla' : 'Přihlášeno Googlem');
-              location.hash = '#/';
-            } catch (e) {
-              toast(e.message, true);
-            }
-            gBtn.disabled = false;
-            gBtn.textContent = 'Pokračovat přes Google';
-          },
-        });
-        client.prompt();
-      } catch (e) {
-        // fallback na redirect, pokud GIS selže
-        gBtn.disabled = false;
-        gBtn.textContent = 'Pokračovat přes Google';
-        location.href = '/api/auth/google';
-      }
-    });
-  }
+  card.append(el('p', { class: 'auth-switch smaller', text: 'Nemáte heslo? Už jste člen — zadejte e-mail a přes odkaz si ho nastavíte.' }));
 
   const switchLink = el('p', { class: 'auth-switch' }, [
     'Ještě nejste členem? ',

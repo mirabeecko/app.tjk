@@ -752,7 +752,11 @@ tbody tr:hover { background: var(--bg-2); }
 @media (max-width: 860px) { .pie-grid { grid-template-columns: 1fr; } }
 .pie-card { padding: 16px; }
 .pie-body { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.pie-wrap { display: grid; place-items: center; }
+.pie-wrap { display: grid; place-items: center; position: relative; }
+/* centrální číslo v doughnut grafu */
+.pie-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; }
+.pie-center strong { display: block; font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; color: var(--text-0); line-height: 1; }
+.pie-center span { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); }
 .pie-seg { transform-origin: center; }
 .pie-legend { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .pie-legend-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; }

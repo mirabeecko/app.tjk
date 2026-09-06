@@ -242,10 +242,12 @@ async function viewSuperAdmin() {
       ['Ženy (18+)', evMembers.filter((m) => m.sex === 'zena' && m.age >= 18).length, '#18AC81'],
       ['Děti (do 18)', evMembers.filter((m) => m.age !== null && m.age < 18).length, '#E53E3E'],
     ],
-    // Věk
+    // Věkové skupiny (modernější rozřazení)
     age: [
-      ['Dospělí (18+)', evMembers.filter((m) => m.age !== null && m.age >= 18).length, '#2E6FDB'],
-      ['Mladiství (<18)', evMembers.filter((m) => m.age !== null && m.age < 18).length, '#E53E3E'],
+      ['Mladiství (do 18)', evMembers.filter((m) => m.age !== null && m.age < 18).length, '#E53E3E'],
+      ['18–30 let', evMembers.filter((m) => m.age !== null && m.age >= 18 && m.age <= 30).length, '#2E6FDB'],
+      ['31–50 let', evMembers.filter((m) => m.age !== null && m.age > 30 && m.age <= 50).length, '#18AC81'],
+      ['50+ let', evMembers.filter((m) => m.age !== null && m.age > 50).length, '#7C3AED'],
     ],
     // Členové / vedoucí
     role: [
@@ -254,14 +256,13 @@ async function viewSuperAdmin() {
     ],
   };
 
-  // Vykresli SVG dónut (koláč s dírou) s hover zvýrazněním + tooltip + legendou.
-  function pieChart(title, segments, size = 210, thickness = 38) {
+  // Vykresli SVG dónut s CENTRÁLNÍM počtem a hover zvýrazněním + tooltip + legendou.
+  function pieChart(title, segments, size = 230, thickness = 42) {
     const total = segments.reduce((s, seg) => s + seg[1], 0) || 1;
     const R = size / 2, r = R - thickness;
     const cx = R, cy = R;
     let angle = -Math.PI / 2; // start nahoře
     const arcs = [];
-    const segEls = [];
     segments.forEach(([label, value, color], i) => {
       const frac = value / total;
       const a0 = angle, a1 = angle + frac * Math.PI * 2;
@@ -282,7 +283,6 @@ async function viewSuperAdmin() {
       seg.addEventListener('mousemove', (ev) => tooltipMove(ev));
       seg.addEventListener('mouseleave', () => hideTooltip());
       arcs.push(seg);
-      segEls.push({ label, value, pct, color, mid: (a0 + a1) / 2, cx, cy, R });
     });
     const svg = el('div', { class: 'pie-wrap' }, []);
     const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -291,6 +291,12 @@ async function viewSuperAdmin() {
     svgEl.setAttribute('height', String(size));
     arcs.forEach((a) => svgEl.appendChild(a));
     svg.appendChild(svgEl);
+    // Centrální číslo (celkem)
+    const inner = el('div', { class: 'pie-center' }, [
+      el('strong', { text: String(total) }),
+      el('span', { text: 'členů' }),
+    ]);
+    svg.appendChild(inner);
     // Legenda
     const legend = el('div', { class: 'pie-legend' });
     segments.filter(([, v]) => v > 0).forEach(([label, value, color]) => {

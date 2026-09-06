@@ -41,6 +41,7 @@ create table if not exists app.members (
   city               text not null default '',
   zip                text not null default '',
   email              text not null unique,
+  password_hash      text,               -- scrypt hash (email+heslo přihlášení; NULL = jen magic link)
   phone              text not null default '',
   membership_type    text not null references app.member_types(code),
   membership_kind    text not null default 'sportovni',  -- sportovni | radne (nový člen = sportovní)

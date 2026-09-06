@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS members (
   city            TEXT NOT NULL DEFAULT '',
   zip             TEXT NOT NULL DEFAULT '',
   email           TEXT NOT NULL,
+  password_hash   TEXT,                    -- scrypt hash (email+heslo přihlášení; NULL = jen magic link)
   phone           TEXT NOT NULL DEFAULT '',
   membership_type TEXT NOT NULL REFERENCES member_types(code),
   membership_kind TEXT NOT NULL DEFAULT 'sportovni',  -- sportovni | radne (nový člen = sportovní)

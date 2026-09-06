@@ -9,6 +9,7 @@ const D = require('./db');
 const A = require('./auth');
 const mailer = require('./mailer');
 const GAuth = require('./google-auth');
+const Pwd = require('./password');
 const payments = require('./payments');
 const S = require('./supabase-sync');
 const E = require('./eligibility');
@@ -305,6 +306,21 @@ async function importFromRegistry(row) {
   };
 }
 
+// ---------- přihlášení e-mail + HESLO ----------
+// Normální přihlášení: email + heslo (hashované scrypt). Člen musí mít nastavené heslo.
+router.post('/login/password', loginLimiter, asyncRoute(async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.status(400).json({ error: 'VALIDACE', message: 'Zadejte e-mail a heslo.' });
+  let member = await D.Members.getByEmail(email);
+  if (!member) return res.status(401).json({ error: 'NEPLATNE_PRIHLASENI', message: 'Nesprávný e-mail nebo heslo.' });
+  if (!Pwd.verify(password, member.password_hash)) {
+    return res.status(401).json({ error: 'NEPLATNE_PRIHLASENI', message: 'Nesprávný e-mail nebo heslo.' });
+  }
+  const token = await D.Sessions.create(member.id, member.role);
+  A.setSessionCookie(res, token);
+  res.json({ ok: true, member: publicMember(member), status: effectiveStatus(member) });
+}));
+
 // ---------- přihlášení (magic link přes e-mail) ----------
 router.post('/login', loginLimiter, asyncRoute(async (req, res) => {
   const { email } = req.body || {};
@@ -348,6 +364,28 @@ router.post('/login/:token', asyncRoute(async (req, res) => {
   const token = await D.Sessions.create(member.id, member.role);
   A.setSessionCookie(res, token);
   res.json({ ok: true, member: publicMember(member) });
+}));
+
+// Nastaví si heslo přihlášený člen (musí být přihlášen).
+router.post('/set-password', A.requireMember, asyncRoute(async (req, res) => {
+  const { password } = req.body || {};
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Heslo musí mít alespoň 6 znaků.' });
+  }
+  await D.Members.update(req.member.id, { password_hash: Pwd.hash(password) });
+  res.json({ ok: true });
+}));
+
+// Admin (superadmin) nastaví heslo členovi podle e-mailu.
+router.post('/superadmin/set-password/:email', A.requireSuperAdmin, asyncRoute(async (req, res) => {
+  const { password } = req.body || {};
+  if (!password || String(password).length < 6) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Heslo musí mít alespoň 6 znaků.' });
+  }
+  const m = await D.Members.getByEmail(decodeURIComponent(req.params.email));
+  if (!m) return res.status(404).json({ error: 'NENALEZEN' });
+  await D.Members.update(m.id, { password_hash: Pwd.hash(password) });
+  res.json({ ok: true, member: publicMember(m) });
 }));
 
 // Najde nebo vytvoří člena podle ověřeného Googlu e-mailu a nastaví session.

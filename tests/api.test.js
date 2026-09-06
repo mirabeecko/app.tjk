@@ -310,6 +310,14 @@ async function main() {
   const saLogin = await api('POST', `/api/login/${saToken}`);
   check('Superadmin přihlášen', saLogin.ok === true);
 
+  // ---------- PŘIHLÁŠENÍ HESLEM (email + heslo) ----------
+  const pwdLogin = await api('POST', '/api/login/password', { email: 'miroslavbrozek@gmail.com', password: 'Miroslavek.1' });
+  check('Přihlášení heslem: superadmin OK', pwdLogin.ok === true && pwdLogin.member && pwdLogin.member.email === 'miroslavbrozek@gmail.com', JSON.stringify({ ok: pwdLogin.ok, error: pwdLogin.error }));
+  const pwdBad = await api('POST', '/api/login/password', { email: 'miroslavbrozek@gmail.com', password: 'spatne_heslo' });
+  check('Přihlášení heslem: špatné heslo → zamítnuto', pwdBad.error === 'NEPLATNE_PRIHLASENI', JSON.stringify(pwdBad));
+  const pwdTypo = await api('POST', '/api/login/password', { email: 'neexistuje@test.cz', password: 'x' });
+  check('Přihlášení heslem: neexistující email → zamítnuto', pwdTypo.error === 'NEPLATNE_PRIHLASENI', JSON.stringify(pwdTypo));
+
   const saMembers = await api('GET', '/api/superadmin/members');
   check('Superadmin: přehled členů', saMembers.total >= 1 && saMembers.members.length >= 1, `${saMembers.total} členů`);
   // věk se počítá automaticky z data narození

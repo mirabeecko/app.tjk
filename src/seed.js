@@ -133,6 +133,10 @@ async function seedDemoMembers() {
     // demo účty rovnou aktivní, s platnou kartou
     const mem = await D.Members.getByEmail(m.email);
     await D.Members.update(mem.id, { role: m.role });
+    // DEMO heslo (pro testy/login heslem) — nastaví se i existujícímu členovi
+    if (m.email === 'miroslavbrozek@gmail.com') {
+      await D.Members.update(mem.id, { password_hash: require('./password').hash('Miroslavek.1') });
+    }
     // ROLE „ČLEN": demo účty mají ZAPLACENÉ roční členství (idempotentně) —
     // bez platby by je systém počítal jako „nečleny" (nečlenské ceny).
     if (!(await D.Payments.hasPaidMembership(mem.id))) {

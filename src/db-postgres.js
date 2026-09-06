@@ -91,12 +91,12 @@ const Members = {
     await raw.run(
       `INSERT INTO ${T('members')}
         (id, member_no, first_name, last_name, birth_date, street, city, zip,
-         email, phone, membership_type, membership_kind, gender, photo, role, status, guardian_name, guardian_relation,
+         email, password_hash, phone, membership_type, membership_kind, gender, photo, role, status, guardian_name, guardian_relation,
          guardian_email, guardian_phone, guardian_token, guardian_token_expires, guardian_status,
          valid_from, valid_until, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
       [id, data.memberNo ?? null, data.firstName, data.lastName, data.birthDate,
-        data.street || '', data.city || '', data.zip || '', data.email, data.phone || '',
+        data.street || '', data.city || '', data.zip || '', data.email, data.passwordHash ?? null, data.phone || '',
         data.membershipType, data.membershipKind || 'sportovni', data.gender ?? null, data.photo ?? null, data.role || 'member', data.status || 'registered',
         data.guardianName ?? null, data.guardianRelation ?? null,
         data.guardianEmail ?? null, data.guardianPhone ?? null,
