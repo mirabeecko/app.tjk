@@ -670,10 +670,16 @@ async function viewEvents() {
 
 /* ---------- offline cache karty ---------- */
 function saveCardOffline(cardData) {
-  try { localStorage.setItem('airbag_card', JSON.stringify(cardData)); } catch (e) { /* quota */ }
+  if (!me || !me.member || !cardData) return;
+  try { localStorage.setItem(`airbag_card_${me.member.id}`, JSON.stringify(cardData)); } catch (e) { /* quota */ }
 }
 function loadCardOffline() {
-  try { return JSON.parse(localStorage.getItem('airbag_card')); } catch (e) { return null; }
+  // Vrátí kartu JEN pokud patří přihlášenému členovi — jinak null (nikdy kartu jiného účtu).
+  if (!me || !me.member) return null;
+  try {
+    const d = JSON.parse(localStorage.getItem(`airbag_card_${me.member.id}`));
+    return d && d.memberId === me.member.id ? d : null;
+  } catch (e) { return null; }
 }
 
 async function fetchPrice(membershipType) {
