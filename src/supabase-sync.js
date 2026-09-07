@@ -220,6 +220,7 @@ async function listEvidenceMembers() {
     zip: m.zip || m.ZIP_CODE || null,
     role: m.role,
     roleLabel: m.role && Number(m.role) === 3 ? 'vedoucí/výbor' : 'člen',
+    membershipKind: m.membership_kind || null,  // řádné | sportovní (uložené v evidenci)
     pozice: m.pozice || null,               // pozice ve spolku
     oddil: m.oddil || null,
     memberFrom: m.member_from || null,
