@@ -254,6 +254,12 @@ async function viewSuperAdmin() {
       ['Běžní členové', evMembers.filter((m) => Number(m.role) !== 3).length, '#2E6FDB'],
       ['Vedoucí / výbor', evMembers.filter((m) => Number(m.role) === 3).length, '#18AC81'],
     ],
+    // Typ členství: řádné vs sportovní
+    kind: [
+      ['Řádné členství', evMembers.filter((m) => m.membershipKind === 'radne').length, '#2E6FDB'],
+      ['Sportovní členství', evMembers.filter((m) => m.membershipKind === 'sportovni').length, '#18AC81'],
+      ['Neuvedeno', evMembers.filter((m) => !m.membershipKind).length, '#8A94A6'],
+    ],
   };
 
   // Vykresli SVG dónut s CENTRÁLNÍM počtem a hover zvýrazněním + tooltip + legendou.
@@ -291,7 +297,7 @@ async function viewSuperAdmin() {
     svgEl.setAttribute('height', String(size));
     arcs.forEach((a) => svgEl.appendChild(a));
     svg.appendChild(svgEl);
-    // Centrální číslo (celkem)
+    // Centrální číslo (celkem) — jako HTML div nad SVG (ne do SVG)
     const inner = el('div', { class: 'pie-center' }, [
       el('strong', { text: String(total) }),
       el('span', { text: 'členů' }),
@@ -331,8 +337,9 @@ async function viewSuperAdmin() {
     el('p', { class: 'muted small', text: 'Interaktivní koláčové grafy z celé členské evidence spolku (public.members). Najeďte na segment pro detail.' }),
   ]);
   const pieGrid = el('div', { class: 'pie-grid' });
+  pieGrid.append(pieChart('Typ členství (řádné / sportovní)', sliceData.kind));
   pieGrid.append(pieChart('Muži / ženy / děti', sliceData.gender));
-  pieGrid.append(pieChart('Dospělí / mladiství', sliceData.age));
+  pieGrid.append(pieChart('Věkové skupiny', sliceData.age));
   pieGrid.append(pieChart('Členové / vedoucí', sliceData.role));
   chartsCard.append(pieGrid);
   root.append(chartsCard);
@@ -437,6 +444,8 @@ async function viewSuperAdmin() {
           await API.patch('/superadmin/evidence/' + m.idCus + '/membership-kind', { kind });
           m.membershipKind = kind;
           toast('Typ členství uložen: ' + KIND_LABEL[kind]);
+          // obnovit pohled → grafy se přepočítají dle nového rozložení
+          viewSuperAdmin();
         } catch (err) {
           sel.value = m.membershipKind === 'sportovni' ? 'sportovni' : 'radne';
           toast(err.message, true);
