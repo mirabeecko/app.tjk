@@ -193,12 +193,22 @@ async function upsertMember(member) {
   return { ok: true, action: 'insert', member: member.email };
 }
 
+// Cache evidence (krátká TTL 15 s) — PostgREST fetch je drahý (6+ s), nechceme ho
+// volat na každý request. Po změně typu členství (PATCH) se cache invaliduje.
+let _evCache = null, _evCacheAt = 0;
+const EV_CACHE_TTL = 15 * 1000;
+
 // Načte CELOU členskou evidenci (public.members) pro admina.
 // Vrací libovolně zformátované řádky (jméno, kontakt, platnost členství…).
-async function listEvidenceMembers() {
+async function listEvidenceMembers({ fresh = false } = {}) {
   if (!cfg.url || !cfg.serviceKey) return { ok: false, error: 'evidence_nenakonfigurovana', members: [] };
   if (cfg.mode === 'off' && !cfg.url) return { ok: false, error: 'off', members: [] };
-  const url = `${cfg.url}/rest/v1/members?select=*&order=surname.asc`;
+  // cache
+  const now = Date.now();
+  if (!fresh && _evCache && (now - _evCacheAt) < EV_CACHE_TTL) return _evCache;
+  // Jen potřebné sloupce (ne select=*) — výrazně rychlejší a menší payload.
+  const COLS = ['id_cus','name','surname','born','sex','mail','phone','street','city','zip','role','oddil','pozice','member_from','member_to','mail_parents','name_parents','vztah','membership_kind','e-mail','ZIP_CODE'];
+  const url = `${cfg.url}/rest/v1/members?select=${COLS.join(',')}&order=surname.asc`;
   const resp = await fetch(url, { headers: apiHeaders() });
   if (!resp.ok) {
     log('listEvidenceMembers CHYBA', `${resp.status} ${(await resp.text()).slice(0, 140)}`);
@@ -229,7 +239,15 @@ async function listEvidenceMembers() {
     guardianName: m.name_parents || null,
     guardianRelation: m.vztah || null,
   }));
-  return { ok: true, members };
+  _evCache = { ok: true, members };
+  _evCacheAt = Date.now();
+  return _evCache;
+}
+
+// Invalidate cache evidence (po změně typu členství / sync).
+function invalidateEvidenceCache() {
+  _evCache = null;
+  _evCacheAt = 0;
 }
 
 // Konfigurace evidence pro UI (sync status): URL + režim (service key se NIKDY nevrací).
@@ -250,4 +268,4 @@ async function syncAll(members) {
   return { ok: ok === results.length, synced: ok, total: results.length, mode: cfg.mode };
 }
 
-module.exports = { enabled, mode, upsertMember, syncAll, findByEmail, fetchFull, toRow, listEvidenceMembers, evidenceConfig, _cfg: cfg };
+module.exports = { enabled, mode, upsertMember, syncAll, findByEmail, fetchFull, toRow, listEvidenceMembers, evidenceConfig, invalidateEvidenceCache, _cfg: cfg };

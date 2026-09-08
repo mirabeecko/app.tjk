@@ -1308,6 +1308,7 @@ router.patch('/superadmin/evidence/:idCus/membership-kind', A.requireSuperAdmin,
   if (!resp.ok) {
     return res.status(502).json({ error: 'EVIDENCE_CHYBA', message: `Evidence vrátila HTTP ${resp.status} — změna se neuložila.` });
   }
+  S.invalidateEvidenceCache(); // po změně typu členství obnovit cache
   res.json({ ok: true, idCus, kind });
 }));
 
