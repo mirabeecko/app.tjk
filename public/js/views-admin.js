@@ -199,7 +199,8 @@ async function viewAdminDetail(memberId) {
 }
 
 /* ---------- SUPERADMIN: vlastník aplikace (jen miroslavbrozek@gmail.com) ---------- */
-async function viewSuperAdmin() {
+async function viewSuperAdmin(opts = {}) {
+  const fresh = opts.fresh === true;
   const root = $('#view');
   root.innerHTML = '';
 
@@ -212,7 +213,21 @@ async function viewSuperAdmin() {
 
   let data, types;
   try {
-    [data, types] = await Promise.all([API.get('/superadmin/members'), API.get('/superadmin/member-types')]);
+    // cache evidence 45 s — Supabase studené připojení je pomalé (serverless).
+    // První načtení po zahřátí rychlé; další do 45 s okamžitě z localStorage.
+    const CACHE_KEY = 'tj_evidence_cache_v1';
+    const now = Date.now();
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(CACHE_KEY)); } catch (e) { /* */ }
+    if (!fresh && cached && (now - (cached.at || 0)) < 45000) {
+      data = cached.data;
+      types = cached.types;
+    } else {
+      [data, types] = await Promise.all([API.get('/superadmin/members'), API.get('/superadmin/member-types')]);
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ data, types, at: now }));
+      } catch (e) { /* quota */ }
+    }
   } catch (e) {
     root.append(el('div', { class: 'alert err', text: e.message }));
     return;
@@ -444,8 +459,8 @@ async function viewSuperAdmin() {
           await API.patch('/superadmin/evidence/' + m.idCus + '/membership-kind', { kind });
           m.membershipKind = kind;
           toast('Typ členství uložen: ' + KIND_LABEL[kind]);
-          // obnovit pohled → grafy se přepočítají dle nového rozložení
-          viewSuperAdmin();
+          // obnovit pohled → grafy se přepočítají dle nového rozložení (fresh = přeskočit cache)
+          viewSuperAdmin({ fresh: true });
         } catch (err) {
           sel.value = m.membershipKind === 'sportovni' ? 'sportovni' : 'radne';
           toast(err.message, true);
