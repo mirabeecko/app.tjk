@@ -66,6 +66,42 @@ for p in /api/me /api/products /api/docs; do
 done
 ```
 
+### ⚠️ POZOR: nenahrávejte strom, který někdo právě upravuje
+
+`vercel --prod` posílá **pracovní strom**, ne poslední commit. Když aplikaci
+zároveň upravuje někdo jiný (editor, jiná agentní session), můžete nahrát
+rozepsaný soubor. 2026-09-26 se takto nasadil `src/seed.js`, kterému právě
+chyběla deklarace `DOCS`, a protože seed běží před každým requestem, spadla
+celá produkce (`ReferenceError: DOCS is not defined` → 500 na všem).
+
+Postup, který to vyloučí — nasazovat ze zmrazeného snapshotu:
+```bash
+cd pwa && git status --short        # musí být prázdné (nebo změny vědomě zahrnout)
+rm -rf /tmp/deploy-app && mkdir -p /tmp/deploy-app
+rsync -a --exclude '.git' --exclude node_modules --exclude data --exclude '.npm-cache' \
+      --exclude android --exclude ios --exclude www --exclude dist --exclude '.vercel-cli' ./ /tmp/deploy-app/
+cp -r .vercel /tmp/deploy-app/      # propojení na projekt tjk-airbag
+cd /tmp/deploy-app && vercel --prod
+```
+
+Rychlá kontrola konzistence před nasazením (kromě `npm test`):
+```bash
+for f in $(find src -name '*.js'); do node --check "$f" || echo "SYNTAX: $f"; done
+DB_DRIVER=postgres SEED_DEMO=false node -e "require('./src/seed').seed().then(()=>console.log('seed OK')).catch(e=>{console.error('SEED CHYBA:',e.message);process.exit(1)})"
+```
+
+### Když produkce vrací 500 a v logu nic není
+
+Runtime logy teče `vercel logs <deployment-url>` (jen živě, build logy nestačí):
+
+```bash
+vercel logs https://tjk-airbag-<hash>-mirabeeckos-projects.vercel.app &
+curl -s -o /dev/null -w '%{http_code}\n' https://app.tjkrupka.cz/api/products
+```
+Chyby z `ensureSeed` a error middleware se tisknou jako `Seed CHYBA:` / `CHYBA:`.
+Na Hobby plánu umí `vercel rollback` jen o jednu verzi zpět — pro starší build
+použijte `vercel promote <deployment-url>` (a tím i rychlou záchranu).
+
 ### ověření
 ```bash
 curl -s https://tjk-airbag.vercel.app/api/config     # paymentGateway: stripe-test
