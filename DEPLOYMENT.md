@@ -41,6 +41,31 @@ vercel --prod
 `vercel.json` (`rewrites` → `/api/index`) + `api/index.js` obslouží i statiku z `public/`.
 Seed běží jednou před prvním requestem (idempotentní upserty).
 
+### ⚠️ POZOR: schéma produkční DB se neaktualizuje samo
+
+`src/db-sqlite.js` si chybějící sloupce přidává za běhu (`ensureColumn`), ale
+**`src/db-postgres.js` nic takového nedělá** — na produkci (Supabase) vzniká
+schéma výhradně ručním spuštěním migrací ze `supabase/migrations/`. Když se
+nasadí kód, který používá nový sloupec nebo tabulku, a migrace se zapomene,
+**padá úplně všechno**: `ensureSeed` běží před každým requestem, takže i
+`/api/me` nebo `/api/products` vrací 500 (přesně to se stalo 2026-09-26).
+
+Před každým nasazením tedy:
+```bash
+ls supabase/migrations/            # co je v repu
+# a porovnat s produkční DB (např. přes psql/DATABASE_URL):
+#   select column_name from information_schema.columns
+#    where table_schema='app' and table_name='consents';
+```
+Migrace jsou psané jako idempotentní (`IF NOT EXISTS`), takže se dají pustit opakovaně.
+
+Rychlé ověření po deployi (nesmí být 500):
+```bash
+for p in /api/me /api/products /api/docs; do
+  printf '%s -> ' "$p"; curl -s -o /dev/null -w '%{http_code}\n' "https://app.tjkrupka.cz$p"
+done
+```
+
 ### ověření
 ```bash
 curl -s https://tjk-airbag.vercel.app/api/config     # paymentGateway: stripe-test
