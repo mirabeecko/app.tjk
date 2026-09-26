@@ -7,6 +7,7 @@ data
 .DS_Store
 .ssm
 .npm-cache-tmp
+.npm-cache
 scripts
 tests
 TJK-Krupka-app*
