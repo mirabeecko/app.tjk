@@ -31,10 +31,12 @@ if (STRIPE_SECRET_KEY) {
 
 const stripeEnabled = !!stripe;
 
-// test | live | off — dle prefixu klíče (sk_ = test, sk_live_ = live)
+// test | live | off — dle prefixu klíče (sk_/rk_ = klíč, *_live_ = reálné platby)
 function stripeMode() {
   if (!STRIPE_SECRET_KEY) return 'off';
-  return STRIPE_SECRET_KEY.startsWith('sk_live_') ? 'live' : 'test';
+  // sk_live_… = standardní tajný klíč, rk_live_… = restricted klíč — oba účtují reálně
+  if (STRIPE_SECRET_KEY.startsWith('sk_live_') || STRIPE_SECRET_KEY.startsWith('rk_live_')) return 'live';
+  return 'test';
 }
 
 // Režim pro UI: 'test' | 'stripe-test' | 'stripe-live'
@@ -55,19 +57,33 @@ function productName(purpose, productCode) {
 async function createStripeSession({ memberId, amountCzk, purpose, productCode, origin }) {
   const payment = await D.Payments.create({ memberId, amountCzk, purpose, productCode, gateway: 'stripe' });
   const member = await D.Members.getById(memberId);
+  // ROČNÍ ČLENSTVÍ = PŘEDPLATNÉ (opakovaná roční platba). Jednorázový vstup
+  // a merch = jednorázová platba.
+  const isSubscription = purpose === 'prispevek';
   const session = await stripe.checkout.sessions.create({
-    mode: 'payment',
+    mode: isSubscription ? 'subscription' : 'payment',
     line_items: [{
       quantity: 1,
       price_data: {
         currency: 'czk',
         unit_amount: Math.round(amountCzk * 100), // Kč → haléře
         product_data: { name: productName(purpose, productCode) },
+        // recidiva: roční předplatné (Stripe z něj vytvoří subscription)
+        ...(isSubscription ? { recurring: { interval: 'year', interval_count: 1 } } : {}),
       },
     }],
     // Propojení webhooku s naší platbou — klíčové metadatové pole
     metadata: { paymentId: payment.id, memberId, purpose, productCode: productCode || '' },
+    // Metadata musí být i na subscription — podle nich se dohledá člen
+    // u OBNOVOVACÍCH faktur (invoice.paid), aby se členství prodloužilo.
+    ...(isSubscription
+      ? { subscription_data: { metadata: { paymentId: payment.id, memberId, purpose } } }
+      : {}),
     customer_email: member ? member.email : undefined,
+    // Slevový poukaz (promotion code) lze zadat v pokladně u JEDNORÁZOVÝCH plateb.
+    // U členství (předplatné) se pole nezobrazuje: sleva by částku stlačila pod
+    // minimální možnou platbu (15 Kč) a Stripe by kód odmítl.
+    ...(isSubscription ? {} : { allow_promotion_codes: true }),
     success_url: `${origin}/#/potvrzeni/${payment.id}`,
     cancel_url: `${origin}/#/platba`,
     locale: 'cs',
@@ -102,6 +118,26 @@ async function createPaymentIntent({ memberId, amountCzk, purpose, gateway = 'te
     gatewayUrl: `/platba/${payment.id}`,
     gateway: 'test',
   };
+}
+
+// Ověření stavu platby PŘÍMO u Stripe (aktivní dotaz, nezávislý na webhooku).
+//
+// PROČ: platba se v aplikaci potvrzuje webhookem (checkout.session.completed).
+// Pokud ale v Stripe není zaregistrovaná adresa
+// https://app.tjkrupka.cz/api/payments/webhook, webhook NIKDY nedorazí a člen
+// zůstane viset ve stavu „čekáme na potvrzení platby“ s neaktivovaným
+// členstvím. Tato funkce stav ověří u Stripe podle uloženého session id
+// (payments.gateway_ref) a při zaplacení platbu označí jako uhrazenou.
+// Je idempotentní — volá se opakovaně a při `paid` už jen vrací řádek.
+async function verifyStripePayment(payment) {
+  if (!payment) return payment;
+  if (payment.status === 'paid') return payment;
+  if (payment.gateway !== 'stripe' || !stripe) return payment;
+  const ref = String(payment.gateway_ref || '');
+  if (!ref.startsWith('cs_')) return payment; // není Checkout Session
+  const session = await stripe.checkout.sessions.retrieve(ref);
+  if (!session || session.payment_status !== 'paid') return payment;
+  return D.Payments.markPaid(payment.id, session.id);
 }
 
 // Test mode: simulace úspěšné platby
@@ -173,14 +209,39 @@ async function handleWebhook(req, rawBody) {
     return { status: 200, paid };
   }
 
+  // Obnovovací faktura členského předplatného → prodloužení členství (routes.js)
+  if (event.type === 'invoice.paid') {
+    const renewal = renewalFromInvoice(event.data.object);
+    if (!renewal) return { status: 200, ignored: 'invoice bez členského předplatného' };
+    return { status: 200, renewal };
+  }
+
   return { status: 200, ignored: event.type };
+}
+
+// OBNOVENÍ členského předplatného: Stripe pošle invoice.paid při každé další
+// roční platbě. První platba (subscription_create) se zpracovává přes
+// checkout.session.completed — proto se zde přeskočí, jinak by se členství
+// prodloužilo dvakrát. Člena najdeme v metadatech předplatného.
+function renewalFromInvoice(invoice) {
+  if (!invoice || invoice.billing_reason === 'subscription_create') return null;
+  const subMeta = (invoice.subscription_details && invoice.subscription_details.metadata) || {};
+  if (!subMeta.memberId || subMeta.purpose !== 'prispevek') return null;
+  return {
+    memberId: subMeta.memberId,
+    invoiceId: invoice.id || null,
+    subscriptionId: invoice.subscription || null,
+    amountCzk: typeof invoice.amount_paid === 'number' ? Math.round(invoice.amount_paid / 100) : null,
+  };
 }
 
 module.exports = {
   createPaymentIntent,
   confirmPayment,
   failPayment,
+  verifyStripePayment,
   handleWebhook,
+  renewalFromInvoice,
   stripeEnabled,
   stripeMode,
   gatewayMode,

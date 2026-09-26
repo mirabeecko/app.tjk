@@ -69,6 +69,15 @@ async function api(method, pathname, body, { raw = false, headers = {} } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// HTML odpovědi (protokol o souhlasu) se neparsují jako JSON — potřebujeme text.
+async function apiText(pathname) {
+  const resp = await fetch(`${BASE}${pathname}`, {
+    headers: cookieHeader() ? { Cookie: cookieHeader() } : {},
+  });
+  parseCookies(resp);
+  return { status: resp.status, text: await resp.text(), contentType: resp.headers.get('content-type') || '' };
+}
+
 // 1×1 PNG (tiny) jako validní base64 data-URL — registrace vyžaduje foto
 const TEST_PHOTO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
@@ -132,6 +141,18 @@ async function main() {
   me = await api('GET', '/api/me');
   check('Stav: payment_pending', me.status === 'payment_pending');
   check('Audit trail: 5 záznamů s IP+časem+hashem', me.consents.length === 5 && me.consents.every((c) => c.ip && c.grantedAt && c.contentHash));
+
+  // DŮKAZNÍ VRSTVA: přesné znění, které člen podepsal + ověření otisku + protokol k tisku
+  const signed = await api('GET', `/api/documents/signed/${adultId}`);
+  check('Doklad o podpisu: 5 souhlasů', !!(signed && signed.consents && signed.consents.length === 5), signed && signed.consents && signed.consents.length);
+  check('Doklad: ke každému souhlasu PŘESNÉ znění + otisk ověřen', !!(signed && signed.consents.every((c) => c.text && c.contentHash && c.integrity === 'OK')));
+  check('Doklad: lidský název dokumentu (ne klíč)', !!(signed && signed.consents.some((c) => c.title === 'Provozní řád dopadové matrace')));
+  check('Doklad: číslo protokolu + otisk balíku', !!(signed && /^TJK-SOUHLAS-\d{8}-/.test(signed.protocolNo) && signed.fingerprint.length === 64), signed && signed.protocolNo);
+  const prot = await apiText(`/api/documents/protocol/${adultId}`);
+  check('Protokol (HTML) se vydá', prot.status === 200 && prot.text.includes('Protokol o elektronickém souhlasu'));
+  check('Protokol: obsahuje otisk podepsaného znění i podpisový blok', prot.text.includes(signed.consents[0].contentHash) && prot.text.includes('Člen — jméno, příjmení a podpis'));
+  const evForbidden = await api('GET', '/api/documents/verify', undefined, { raw: true });
+  check('Kontrola integrity: běžný člen → 403', evForbidden.status === 403, String(evForbidden.status));
   check('Audit trail: signer=member', me.consents.every((c) => c.signerType === 'member'));
 
   // platba
@@ -588,6 +609,30 @@ async function main() {
   const chkMember = await api('POST', '/api/check-card', { qrPayload: cCard.qrPayload });
   check('Dozor: člen povolen (membership)', chkMember.ok === true && chkMember.accessReason === 'membership', JSON.stringify({ ok: chkMember.ok, reason: chkMember.accessReason }));
 
+  // ---------- TOK J: důkazní vrstva — kontrola integrity a odhalení zásahu ----------
+  console.log('\n=== TOK J: důkazní vrstva (protokol, integrita, odhalení zásahu do znění) ===\n');
+  await reloginSuperAdmin();
+  const vOk = await api('GET', '/api/documents/verify');
+  check('Kontrola integrity všech souhlasů: v pořádku', !!vOk && vOk.verdict === 'OK' && vOk.problems === 0, `${vOk && vOk.total} souhlasů`);
+
+  // Člen vidí doklad o podpisu i u cizího člena nesmí (403)
+  const foreignDocs = await api('GET', '/api/documents/signed/00000000-0000-0000-0000-000000000000', undefined, { raw: true });
+  check('Doklad cizího člena neexistuje → 404', foreignDocs.status === 404, String(foreignDocs.status));
+
+  // Simulace zásahu: přepíšeme ZNĚNÍ dokumentu v DB (otisk u souhlasu zůstane původní)
+  const dT = new Database(path.join(__dirname, '..', 'data', 'airbag.db'));
+  const origDoc = dT.prepare("SELECT content, content_hash FROM doc_versions WHERE doc_key = 'provozni_rad' ORDER BY version DESC LIMIT 1").get();
+  dT.prepare("UPDATE doc_versions SET content = content || '\\nZMENA PO PODPISU' WHERE doc_key = 'provozni_rad'").run();
+  const vBad = await api('GET', '/api/documents/verify');
+  check('Zásah do znění po podpisu → kontrola ohlásí problém', !!vBad && vBad.problems >= 1 && vBad.verdict === 'PROBLEM', `${vBad && vBad.problems} problémů`);
+  const badProtocol = await apiText(`/api/documents/protocol/${regC.member.id}`);
+  check('Protokol u rozbitého otisku varuje (OTISK NESOUHLASÍ)', badProtocol.text.includes('OTISK NESOUHLASÍ'));
+  // vrátíme původní znění → kontrola musí být zase v pořádku
+  dT.prepare("UPDATE doc_versions SET content = ? WHERE doc_key = 'provozni_rad' AND content_hash = ?").run(origDoc.content, origDoc.content_hash);
+  const vRestored = await api('GET', '/api/documents/verify');
+  check('Po vrácení znění je kontrola opět v pořádku', vRestored.verdict === 'OK', JSON.stringify(vRestored.problems));
+  dT.close();
+
   // úklid testovacích členů po běhu (lokální DB) — evidence se nezanáší
   // (sync modul navíc @test.cz emaily do Supabase nikdy neodesílá)
   const dClean = new Database(path.join(__dirname, '..', 'data', 'airbag.db'));
@@ -638,7 +683,11 @@ async function ensureServer() {
     env: { ...process.env, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
       // TEST MODE: reálný SMTP z .env se NEPROPOUŠTÍ — testy běží se stub emaily (outbox),
       // jinak by se přes SMTP (Resend) reálně odesílaly a zpomalovaly/lámaly testy.
-      SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '' },
+      SMTP_HOST: '', SMTP_USER: '', SMTP_PASS: '', RESEND_API_KEY: '',
+      // POZOR: mailer.js má nově i cestu přes centrální _config/mail/credentials.json.
+      // Smazání SMTP_* ji NEVYPNE — bez tohoto by testy posílaly reálné e-maily
+      // (testy se přihlašují reálnými adresami). Cesta do tests/ neexistuje → stub.
+      MAIL_CONFIG: path.join(__dirname, 'no-central-mail.json') },
   });
   serverProc.stdout.on('data', (d) => process.stdout.write('[server] ' + d));
   serverProc.stderr.on('data', (d) => process.stdout.write('[server-err] ' + d));

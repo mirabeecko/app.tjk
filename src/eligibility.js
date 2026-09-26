@@ -9,9 +9,11 @@
 const D = require('./db');
 
 // Dokumenty k ČLENSTVÍ (config: klíče → doc_versions; texty viz docs/*)
-const MEMBERSHIP_DOCS = ['stanovy', 'gdpr'];
+// Součástí členství je i PROVOZNÍ ŘÁD zařízení — člen bez něj nesmí na zařízení
+// vstoupit, proto se vyžaduje už při registraci člena (ne až u služby).
+const MEMBERSHIP_DOCS = ['stanovy', 'provozni_rad', 'gdpr'];
 // Dokumenty, které musí podepsat zákonný zástupce nezletilého při členství
-const GUARDIAN_MEMBERSHIP_DOCS = ['stanovy', 'gdpr', 'guardian_souhlas'];
+const GUARDIAN_MEMBERSHIP_DOCS = ['stanovy', 'provozni_rad', 'gdpr', 'guardian_souhlas'];
 
 // Věk z data narození — časově bezpečný výpočet (bez posunu o časové pásmo).
 // Zvládá Date (Postgres), ISO string i 'YYYY-MM-DD' (SQLite).
@@ -119,9 +121,20 @@ async function checkDocs(memberId, userDocs, guardianDocs) {
 // ── ČLENSTVÍ ──────────────────────────────────────────────────────
 async function membershipEligibility(m) {
   const st = await userState(m);
-  if (st.isMember) return { ok: true, state: st, message: 'Členství je aktivní.' };
   const guardianDocs = st.isMinor ? GUARDIAN_MEMBERSHIP_DOCS : [];
+  // POZOR: i aktivní člen dostává `required`/`missing` — UI souhrnů (stránka
+  // Souhlasy, /consent-groups) je čte pro všechny stavy; dřív chyběly a shodily
+  // /api/consent-groups na 500 (Cannot read properties of undefined).
   const d = await checkDocs(m.id, MEMBERSHIP_DOCS, guardianDocs);
+  if (st.isMember) {
+    return {
+      ok: true,
+      state: st,
+      required: { user: MEMBERSHIP_DOCS, guardian: guardianDocs },
+      missing: { user: [], guardian: [], guardianNotGranted: false },
+      message: 'Členství je aktivní.',
+    };
+  }
   const ok = d.missingUser.length === 0 && (!st.isMinor || (st.guardianGranted && d.missingGuardian.length === 0));
   return {
     ok,

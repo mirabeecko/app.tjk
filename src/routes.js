@@ -706,6 +706,8 @@ function canSeeMemberDocs(req, memberId) {
 
 // JSON: podepsané dokumenty člena včetně PŘESNÉHO znění podepsané verze + ověření otisku
 router.get('/documents/signed/:memberId', A.requireMember, asyncRoute(async (req, res) => {
+  // Postgres má PK typu uuid → neplatný formát by shodil dotaz na 500 (viz isUuid níže)
+  if (!isUuid(req.params.memberId)) return res.status(404).json({ error: 'NENALEZENO', message: 'Člen nebyl nalezen.' });
   const m = await D.Members.getById(req.params.memberId);
   if (!m) return res.status(404).json({ error: 'NENALEZENO', message: 'Člen nebyl nalezen.' });
   if (!canSeeMemberDocs(req, m.id)) {
@@ -716,6 +718,7 @@ router.get('/documents/signed/:memberId', A.requireMember, asyncRoute(async (req
 
 // HTML: PROTOKOL O ELEKTRONICKÉM SOUHLASU — k tisku / uložení jako PDF / do spisu
 router.get('/documents/protocol/:memberId', A.requireMember, asyncRoute(async (req, res) => {
+  if (!isUuid(req.params.memberId)) return res.status(404).type('text/plain').send('Člen nebyl nalezen.');
   const m = await D.Members.getById(req.params.memberId);
   if (!m) return res.status(404).type('text/plain').send('Člen nebyl nalezen.');
   if (!canSeeMemberDocs(req, m.id)) {

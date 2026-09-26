@@ -14,7 +14,9 @@
     "mobile:copy": "node scripts/build-www.js",
     "mobile:sync": "npm run mobile:copy && cap sync",
     "mobile:android": "npm run mobile:sync && cap open android",
-    "mobile:ios": "npm run mobile:sync && cap open ios"
+    "mobile:ios": "npm run mobile:sync && cap open ios",
+    "verify-consents": "node scripts/verify-consents.js",
+    "evidence:export": "node scripts/verify-consents.js --export ../evidence-pack"
   },
   "engines": {
     "node": ">=18"

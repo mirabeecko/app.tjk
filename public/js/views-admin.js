@@ -158,18 +158,37 @@ async function viewAdminDetail(memberId) {
   ]);
   root.append(info);
 
-  // AUDITNÍ STOPA
-  const audit = el('div', { class: 'card' }, [el('h3', { text: 'Auditní stopa souhlasů' }), el('p', { class: 'muted small', text: 'Kdo, s čím, kdy a odkud souhlasil — nelze zpochybnit.' })]);
-  if (!d.consents.length) audit.append(el('div', { class: 'empty', text: 'Žádné souhlasy.' }));
-  for (const c of d.consents) {
+  // AUDITNÍ STOPA + DOKLAD O PODPISU (protokol k tisku / PDF)
+  let evd = null;
+  try { evd = await API.get(`/documents/signed/${id}`); } catch (e) { /* offline */ }
+  const audit = el('div', { class: 'card' }, [
+    el('h3', { text: 'Auditní stopa souhlasů' }),
+    el('p', { class: 'muted small', text: 'Kdo, s jakým zněním, kdy a odkud souhlasil. U každého souhlasu je otisk SHA-256 znění — kontrola přepočtem odhalí, že se text od podpisu změnil.' }),
+  ]);
+  if (evd) {
+    audit.append(el('div', { class: 'row-gap', style: 'align-items:center; margin-bottom:10px' }, [
+      el('a', { class: 'btn small', href: `/api/documents/protocol/${id}`, target: '_blank', rel: 'noopener' }, [ico('file', 16), ' ', 'Protokol o souhlasu (tisk / PDF)']),
+      el('span', { class: `tag ${evd.summary.verdict === 'OK' ? 'ok' : 'bad'}`, text: evd.summary.verdict === 'OK' ? `integrita ověřena (${evd.summary.ok}/${evd.summary.signed})` : 'pozor — zkontrolovat' }),
+    ]));
+  }
+  const consentList = evd ? evd.consents : (d.consents || []);
+  if (!consentList.length) audit.append(el('div', { class: 'empty', text: 'Žádné souhlasy.' }));
+  for (const c of consentList) {
+    const signer = c.signerType === 'guardian' ? 'zákonný zástupce' : 'člen';
     audit.append(el('div', { class: 'list-row' }, [
       el('div', {}, [
-        el('div', { class: 'l-name', text: `${c.docKey} v${c.version} (${c.signerType === 'guardian' ? 'zákonný zástupce' : 'člen'})` }),
-        el('div', { class: 'l-sub mono', text: `${c.grantedAt} · ${c.identity} · IP ${c.ip}${c.userAgent ? ' · ' + (c.userAgent || '').slice(0, 60) : ''}` }),
-        el('div', { class: 'l-sub mono', text: `hash ${c.contentHash}` }),
+        el('div', { class: 'l-name', text: `${c.title || c.docKey} — v${c.version} (${signer})` }),
+        el('div', { class: 'l-sub', text: `${c.grantedAtLabel || c.grantedAt} · ${c.identity} · IP ${c.ip}` }),
+        el('div', { class: 'l-sub mono', text: `SHA-256 ${c.contentHash}` }),
       ]),
-      el('span', { class: 'tag ok', text: 'podepsáno' }),
+      el('span', { class: `tag ${!c.integrity || c.integrity === 'OK' ? 'ok' : 'bad'}`, text: !c.integrity ? 'podepsáno' : (c.integrity === 'OK' ? 'otisk ověřen' : (c.integrity === 'CHYBI_TEXT' ? 'chybí znění' : 'ke kontrole')) }),
     ]));
+    if (c.text) {
+      audit.append(el('details', { class: 'doc-details' }, [
+        el('summary', { text: 'Zobrazit znění z podpisu (verze, kterou člen potvrdil)' }),
+        el('div', { class: 'doc-body', text: c.text }),
+      ]));
+    }
   }
   root.append(audit);
 
@@ -833,6 +852,31 @@ async function viewAdminCatalog() {
   }
   root.append(el('h1', { text: 'Konfigurace katalogu' }));
   root.append(el('p', { class: 'muted', text: 'Produkty, jejich varianty (cena/role/věk), povinné dokumenty a znění dokumentů. Změny se projeví okamžitě — bez nové verze aplikace. Nová verze textu dokumentu vyvolá u uživatelů nový souhlas.' }));
+
+  // KONTROLA DŮKAZNÍ VRSTVY (nic nemění — jen přepočítá otisky uložených souhlasů)
+  const verifyOut = el('div', { class: 'muted small', style: 'margin-top:8px' });
+  const verifyBtn = el('button', { class: 'btn small', text: 'Zkontrolovat integritu všech souhlasů' });
+  verifyBtn.addEventListener('click', async () => {
+    verifyBtn.disabled = true; verifyBtn.textContent = 'Kontroluji…';
+    try {
+      const r = await API.get('/documents/verify');
+      verifyOut.innerHTML = '';
+      verifyOut.append(
+        el('span', { class: `tag ${r.problems ? 'bad' : 'ok'}`, text: r.problems ? `${r.problems} problémů` : 'vše v pořádku' }),
+        el('span', { text: ` zkontrolováno ${r.total} souhlasů · ${fmtDateTime(r.checkedAt)}` })
+      );
+      if (r.problems) {
+        verifyOut.append(el('div', { class: 'l-sub', text: r.problemsDetail.map((p) => `${p.title} v${p.version} (${p.identity})`).join(' · ') }));
+      }
+    } catch (e) { toast(e.message, true); }
+    verifyBtn.disabled = false; verifyBtn.textContent = 'Zkontrolovat integritu všech souhlasů';
+  });
+  root.append(el('div', { class: 'card' }, [
+    el('h3', { text: 'Kontrola souhlasů (integrita znění)' }),
+    el('p', { class: 'muted small', text: 'Přepočítá otisk SHA-256 u všech uložených souhlasů a porovná ho s otiskem z doby podpisu. Odhalí, že se znění dokumentu dodatečně změnilo.' }),
+    verifyBtn,
+    verifyOut,
+  ]));
 
   let cat;
   try { cat = await API.get('/superadmin/catalog'); }

@@ -176,6 +176,13 @@ const DocVersions = {
   async getById(id) {
     return raw.get(`SELECT * FROM ${T('doc_versions')} WHERE id = $1`, [id]);
   },
+  // KONKRÉTNÍ VERZE dokumentu — pro důkazní protokol („tohle znění člen podepsal“).
+  async byKeyVersion(docKey, version) {
+    return raw.get(
+      `SELECT * FROM ${T('doc_versions')} WHERE doc_key = $1 AND version = $2`,
+      [docKey, version]
+    );
+  },
   async createNext({ docKey, title, content, effectiveFrom }) {
     const latest = await this.latest(docKey);
     if (latest && latest.content === content) return latest;
