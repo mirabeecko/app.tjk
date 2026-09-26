@@ -1256,7 +1256,9 @@ body { background: var(--bg-0); }
    Účet dozoru má ODLIŠNÉ barvy, aby se na první pohled poznal od členského.
    =========================================================================== */
 
-/* ---- téma podle role: účet dozoru = tmavě modrozelená, vlastník = fialová ---- */
+/* ---- téma podle role: dozor = modrozelená, výbor = fialová ----
+   POZOR: superadmin (vlastník) má VLASTNÍ a výrazně odlišné téma CELÉHO
+   prostředí (karmínová) — viz sekce „PŘIHLÁŠENÝ PROFIL" na konci souboru. */
 body.role-dozor {
   --primary: #0E8D66;
   --primary-hover: #0B6E50;
@@ -1272,7 +1274,6 @@ body.role-dozor {
 }
 body.role-dozor .topbar { border-bottom: 2px solid rgba(14, 141, 102, 0.35); }
 body.role-vybor { --primary: #7757D6; --primary-hover: #5F41BC; --primary-soft: rgba(119, 87, 214, 0.12); }
-body.role-superadmin { --primary: #7757D6; --primary-hover: #5F41BC; --primary-soft: rgba(119, 87, 214, 0.12); }
 
 /* ---- odznak role ---- */
 .role-badge {
@@ -1477,4 +1478,264 @@ body.role-superadmin { --primary: #7757D6; --primary-hover: #5F41BC; --primary-s
   .dc-title { font-size: 1.22rem; }
   .entry-when { min-width: 0; }
   .entry-rel { display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PŘIHLÁŠENÝ PROFIL — TRVALE VIDITELNÝ PRUH + BARVA CELÉHO PROSTŘEDÍ
+   (2026-09-27)
+   Požadavek: při testování se zakládá mnoho profilů a musí být vždy a na
+   každé obrazovce vidět, VE KTERÉM PROFILU jsem přihlášen. Křestní jméno
+   k tomu nestačí → pruh i navigace zobrazují CELÉ jméno, roli a e-mail.
+   U superadmina (vlastníka) navíc CELÉ prostředí mění barvu (karmínová),
+   aby nešlo splést běžný členský pohled s vlastnickým.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root { --idbar-h: 46px; }
+
+/* ---------- 1) PRUH PŘIHLÁŠENÉHO PROFILU ---------- */
+.idbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 70;
+  height: var(--idbar-h);
+  display: flex; align-items: center; gap: 14px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  font-family: var(--font-body); font-size: 0.82rem;
+  background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border-bottom: 1px solid var(--border-strong);
+  box-shadow: 0 6px 18px -14px rgba(0, 0, 0, 0.9);
+  animation: idbarIn var(--dur-med) var(--ease-out) both;
+}
+.idbar[hidden] { display: none !important; }
+@keyframes idbarIn { from { opacity: 0; transform: translateY(-100%); } to { opacity: 1; transform: none; } }
+
+/* obsah se musí vejít i na malý telefon → jméno se zkracuje, zbytek drží */
+.idbar-profile {
+  display: flex; align-items: baseline; gap: 7px; min-width: 0; flex: 0 1 auto;
+  text-decoration: none; color: var(--text-0);
+}
+.idbar-label { color: var(--text-2); font-size: 0.74rem; font-weight: 600; white-space: nowrap; }
+.idbar-name {
+  font-family: var(--font-display); font-weight: 800; font-size: 0.95rem;
+  letter-spacing: -0.01em; color: var(--text-0);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.idbar-profile:hover .idbar-name { color: var(--primary); }
+.idbar-role {
+  flex: none; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-1);
+  padding: 2px 9px; border-radius: var(--radius-pill);
+  background: var(--bg-2); border: 1px solid var(--border);
+}
+.idbar-mail {
+  flex: 0 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 0.74rem;
+  color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.idbar-flag {
+  flex: none; display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-display); font-size: 0.7rem; font-weight: 800;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 3px 11px; border-radius: var(--radius-pill);
+  background: var(--primary-soft); color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.idbar-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 22%, transparent);
+}
+
+/* obsah pod pruhem se posune — nic nesmí zůstat schované za pruhem */
+body.has-idbar { padding-top: var(--idbar-h); }
+body.has-idbar .topbar { top: var(--idbar-h); }
+@media (min-width: 1024px) {
+  body.has-idbar .rail { top: var(--idbar-h); height: calc(100vh - var(--idbar-h)); }
+}
+
+@media (max-width: 700px) {
+  .idbar-label { display: none; }
+  .idbar-mail { display: none; }
+  .idbar { gap: 10px; }
+  .idbar-name { font-size: 0.9rem; }
+}
+@media (max-width: 420px) {
+  .idbar-role { display: none; }  /* zkratka role zůstává v odznaku vlevo */
+}
+
+/* ---------- 2) CHIP PŘIHLÁŠENÉHO PROFILU V NAVIGACI ---------- */
+.nav-btn.nav-me { gap: 8px; max-width: 260px; }
+.nav-me-name { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-me-role {
+  flex: none; font-size: 0.62rem; font-weight: 800; letter-spacing: 0.1em;
+  padding: 2px 7px; border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.28); color: inherit;
+}
+@media (max-width: 1180px) { .nav-me-name { max-width: 130px; } }
+
+/* ---------- 3) SUPERADMIN: CELÉ PROSTŘEDÍ V KARMÍNOVÉ ---------- */
+/* Vlastník nesmí nikdy zaměnit vlastnický pohled za běžný členský: mění se
+   pozadí, akcenty, lišty, tlačítka, okraje karet i pruh profilu. */
+body.role-superadmin {
+  --sa-100: #FFE1E8;
+  --sa-200: #FFC2D1;
+  --sa-300: #FF8FA9;
+  --sa-400: #FF5C7F;
+  --sa-500: #F5254F;
+  --sa-600: #D8123C;
+  --sa-700: #A80C2E;
+
+  --primary: var(--sa-500);
+  --primary-hover: var(--sa-400);
+  --primary-bright: var(--sa-400);
+  --primary-deep: var(--sa-700);
+  --primary-soft: rgba(245, 37, 79, 0.18);
+  --primary-glow: rgba(245, 37, 79, 0.45);
+
+  --accent: var(--sa-500);
+  --accent-deep: var(--sa-300);
+  --accent-soft: rgba(245, 37, 79, 0.16);
+
+  /* akcentová škála se přebarvuje taky — jinak by tlačítka a odkazy zůstaly
+     limetkové a půlka prostředí by zůstala „členská" */
+  --pine-100: #FFE1E8;
+  --pine-200: #FFC2D1;
+  --pine-300: #FF8FA9;
+  --pine-400: #FF5C7F;
+  --pine-500: #F5254F;
+  --pine-600: #E01B45;
+  --pine-700: #D8123C;
+  --pine-800: #A80C2E;
+  --pine-900: #6E0620;
+
+  --border: rgba(255, 143, 169, 0.20);
+  --border-strong: rgba(255, 143, 169, 0.36);
+  --mesh-a: rgba(245, 37, 79, 0.18);
+  --mesh-b: rgba(150, 45, 210, 0.12);
+  --mesh-c: rgba(255, 92, 127, 0.08);
+  --shadow-glow: 0 10px 30px -10px rgba(245, 37, 79, 0.5);
+
+  background:
+    radial-gradient(58rem 32rem at 84% -16%, rgba(245, 37, 79, 0.26), transparent 62%),
+    radial-gradient(46rem 28rem at -8% 12%, rgba(150, 45, 210, 0.14), transparent 60%),
+    linear-gradient(180deg, #24040F 0%, #12060F 34%, var(--bg-0) 100%);
+  background-attachment: fixed;
+}
+/* text na karmínové musí být bílý (výchozí je tmavý kvůli limetce) */
+body.role-superadmin .btn,
+body.role-superadmin .btn:hover,
+body.role-superadmin .btn.accent,
+body.role-superadmin .nav-btn.cta,
+body.role-superadmin .nav-btn.active,
+body.role-superadmin .rail-nav .nav-btn.active,
+body.role-superadmin .mobile-menu .mm-item.active .mm-icon,
+body.role-superadmin .bottomnav a.active .ico { color: #fff; }
+body.role-superadmin .nav-me-role { background: rgba(0, 0, 0, 0.30); }
+body.role-superadmin ::selection { background: var(--sa-500); color: #fff; }
+
+/* lišty a rámy = karmínová, aby byla změna vidět i bez scrollu */
+body.role-superadmin .topbar { border-bottom: 2px solid rgba(245, 37, 79, 0.45); }
+body.role-superadmin .rail { border-right-color: rgba(255, 143, 169, 0.30); }
+body.role-superadmin .rail-dot { background: var(--sa-400); box-shadow: 0 0 0 4px rgba(245, 37, 79, 0.20); }
+body.role-superadmin .card,
+body.role-superadmin .stat-tile { border-color: rgba(255, 143, 169, 0.22); }
+body.role-superadmin .bottomnav,
+body.role-superadmin .mobile-menu { border-color: rgba(255, 143, 169, 0.30); }
+body.role-superadmin .mm-item.hl-owner {
+  background: linear-gradient(90deg, rgba(245, 37, 79, 0.20), rgba(245, 37, 79, 0.05));
+  border-left-color: var(--sa-500);
+}
+body.role-superadmin .mm-item.hl-owner .mm-icon { color: var(--sa-300); }
+
+/* hero a „join" karta měly limetku natvrdo → ve vlastnickém režimu karmínová */
+body.role-superadmin .hero-full {
+  background:
+    radial-gradient(58rem 30rem at 88% -30%, rgba(245, 37, 79, 0.26), transparent 60%),
+    radial-gradient(44rem 26rem at -8% 30%, rgba(150, 45, 210, 0.16), transparent 55%),
+    linear-gradient(160deg, #14040C 0%, #22060F 48%, #3A0A1C 100%);
+}
+body.role-superadmin .hero-full::after { background: radial-gradient(circle at 35% 35%, var(--sa-400), var(--sa-700) 55%, transparent 72%); }
+body.role-superadmin .hero-inner .pill { color: var(--sa-200); background: rgba(245, 37, 79, 0.12); border-color: rgba(245, 37, 79, 0.36); }
+body.role-superadmin .hero-inner .pill::before { background: var(--sa-300); }
+body.role-superadmin .hero-full .hero-stat .hs-value em { color: var(--sa-200); }
+body.role-superadmin .hero { border-top-color: var(--sa-500); }
+body.role-superadmin .member-card { border-color: rgba(255, 143, 169, 0.30); }
+body.role-superadmin .member-card .mc-no { color: var(--sa-200); }
+body.role-superadmin .card.primary {
+  background: linear-gradient(135deg, #FF5C7F, #D8123C 55%, #8E0A28);
+  color: #fff;
+}
+body.role-superadmin .card.primary .muted { color: rgba(255, 255, 255, 0.86); }
+body.role-superadmin .benefit-list li { color: #fff; }
+body.role-superadmin .bl-check { background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.32); }
+body.role-superadmin .card.primary .btn.accent { background: #1A0208; color: var(--sa-200); }
+
+/* ---------- 4) PRUH PROFILU PODLE ROLE ---------- */
+.idbar[data-role="dozor"] .idbar-flag { background: rgba(14, 141, 102, 0.18); color: #5BE3B4; border-color: rgba(14, 141, 102, 0.5); }
+.idbar[data-role="dozor"] { border-bottom-color: rgba(14, 141, 102, 0.5); }
+.idbar[data-role="vybor"] .idbar-flag { background: rgba(119, 87, 214, 0.20); color: #C3B0FA; border-color: rgba(119, 87, 214, 0.5); }
+.idbar[data-role="vybor"] { border-bottom-color: rgba(119, 87, 214, 0.5); }
+
+/* SUPERADMIN: nejvýraznější — karmínová, výstražné šrafování, tmavý podklad.
+   Pruh musí „křičet" na každé obrazovce, i když je zbytek UI přebarvený. */
+.idbar[data-role="superadmin"] {
+  background:
+    repeating-linear-gradient(115deg, rgba(0, 0, 0, 0.16) 0 12px, transparent 12px 24px),
+    linear-gradient(90deg, #A80C2E 0%, #F5254F 46%, #FF5C7F 100%);
+  border-bottom: 2px solid #FFC2D1;
+  box-shadow: 0 10px 26px -14px rgba(245, 37, 79, 0.9);
+}
+.idbar[data-role="superadmin"] .idbar-label { color: rgba(255, 255, 255, 0.86); }
+.idbar[data-role="superadmin"] .idbar-name { color: #fff; }
+.idbar[data-role="superadmin"] .idbar-profile:hover .idbar-name { color: #FFE1E8; }
+.idbar[data-role="superadmin"] .idbar-role {
+  background: rgba(0, 0, 0, 0.34); color: #fff; border-color: rgba(255, 255, 255, 0.42);
+}
+.idbar[data-role="superadmin"] .idbar-mail { color: rgba(255, 255, 255, 0.86); }
+.idbar[data-role="superadmin"] .idbar-flag {
+  background: #1A0208; color: #FFC2D1; border-color: rgba(255, 255, 255, 0.5);
+}
+.idbar[data-role="superadmin"] .idbar-dot { background: #FFC2D1; box-shadow: 0 0 0 3px rgba(255, 194, 209, 0.35); }
+
+/* na malých telefonech zůstává jméno + zkratka role, zbytek se schová */
+@media (max-width: 700px) {
+  .idbar[data-role="superadmin"] { padding-left: 12px; padding-right: 12px; }
+}
+
+/* =========================================================================
+   PROVOZNÍ KNIHA A PŘIPRAVENOST (2026-09-28)
+   Rozlišení tří skutečností: dokument potvrzen × instruktáž absolvována ×
+   vstup povolen. Dozor musí na první pohled vidět, co chybí.
+   ========================================================================= */
+.state-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 8px 0 10px; }
+.state-box { border: 1px solid var(--border, #dfe3ea); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.state-box .sb-k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; opacity: .72; }
+.state-box .sb-v { font-size: 18px; font-weight: 800; }
+.state-box.yes { border-color: #1f9d63; background: rgba(31, 157, 99, .08); }
+.state-box.yes .sb-v { color: #1f9d63; }
+.state-box.no { border-color: #d64545; background: rgba(214, 69, 69, .08); }
+.state-box.no .sb-v { color: #d64545; }
+.state-box.big .sb-v { font-size: 22px; }
+@media (max-width: 640px) { .state-row { grid-template-columns: 1fr; } }
+
+.blocking-list { border: 1px solid #d64545; background: rgba(214, 69, 69, .07); border-radius: 10px; padding: 10px 12px; margin: 8px 0 12px; }
+.blocking-list .bl-title { font-weight: 700; margin-bottom: 4px; }
+.blocking-list .bl-item { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 3px 0; }
+
+.provozni-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.provozni-head .ph-day { font-weight: 700; display: flex; gap: 6px; align-items: center; }
+
+.check-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.check-item { display: flex; flex-direction: column; gap: 4px; }
+.check-item label { font-size: 12px; opacity: .8; }
+
+.pin-input { max-width: 320px; }
+.dozor-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.dozor-form .input { flex: 1 1 240px; }
+
+/* v postranním railu je místa málo → přednost má CELÉ jméno, roli nese pruh
+   nahoře i odznak; jinak by se jméno zkracovalo na „Miroslav …" */
+@media (min-width: 1024px) {
+  .rail-nav .nav-me { max-width: none; width: 100%; justify-content: flex-start; }
+  .rail-nav .nav-me-name { max-width: none; flex: 1 1 auto; }
+  .rail-nav .nav-me-role { display: none; }
 }

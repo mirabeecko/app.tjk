@@ -192,3 +192,87 @@ function roleBadge() {
   if (r === 'superadmin') return el('span', { class: 'role-badge owner', text: 'VLASTNÍK' });
   return null;
 }
+
+/* ===========================================================================
+ * PŘIHLÁŠENÝ PROFIL — TRVALE VIDITELNÝ PRUH (2026-09-27)
+ * Zadání: při testování se zakládá mnoho profilů a musí být na KAŽDÉ obrazovce
+ * na první pohled vidět, ve kterém profilu jsem právě přihlášen. Křestní jméno
+ * v navigaci k tomu nestačí → pruh i navigace zobrazují CELÉ jméno + roli
+ * + e-mail (e-mail je jediný jednoznačný identifikátor účtu).
+ * Pruh #idbar je součástí shellu (index.html), takže ho každé zobrazení jen
+ * naplní — sám se nikdy neodstraňuje a zůstává viditelný i při scrollu.
+ * ========================================================================= */
+const ROLE_LABEL = {
+  member: 'Člen',
+  dozor: 'Dozor',
+  vybor: 'Výbor',
+  superadmin: 'Vlastník (superadmin)',
+};
+const ROLE_SHORT = {
+  member: 'ČLEN',
+  dozor: 'DOZOR',
+  vybor: 'VÝBOR',
+  superadmin: 'SUPERADMIN',
+};
+
+/** Celé jméno profilu — křestní jméno samo o sobě k rozlišení profilů nestačí. */
+function memberFullName(m) {
+  if (!m) return '';
+  const name = [m.firstName, m.lastName]
+    .map((s) => (s == null ? '' : String(s).trim()))
+    .filter(Boolean)
+    .join(' ');
+  return name || m.email || 'neznámý profil';
+}
+
+function roleLabel(role) { return ROLE_LABEL[role] || role || 'Člen'; }
+function roleShort(role) { return ROLE_SHORT[role] || 'PROFIL'; }
+
+/** Naplní trvale viditelný pruh přihlášeným profilem (nebo ho skryje). */
+function renderIdentityBar() {
+  const bar = $('#idbar');
+  if (!bar) return;
+  const session = (typeof currentMe === 'function') ? currentMe() : null;
+  const member = session && session.member ? session.member : null;
+
+  if (!member) {
+    bar.textContent = '';
+    bar.hidden = true;
+    bar.removeAttribute('data-role');
+    document.body.classList.remove('has-idbar');
+    setThemeColor(null);
+    return;
+  }
+
+  const role = member.role || 'member';
+  const full = memberFullName(member);
+  bar.textContent = '';
+  bar.dataset.role = role;
+  bar.append(
+    el('span', { class: 'idbar-flag' }, [
+      el('span', { class: 'idbar-dot' }),
+      el('span', { text: roleShort(role) }),
+    ]),
+    el('a', {
+      class: 'idbar-profile',
+      href: '#/profil',
+      title: 'Otevřít profil přihlášeného účtu',
+    }, [
+      el('span', { class: 'idbar-label', text: 'Přihlášený profil:' }),
+      el('strong', { class: 'idbar-name', text: full }),
+    ]),
+    el('span', { class: 'idbar-role', text: session.roleLabel || roleLabel(role) }),
+    el('span', { class: 'idbar-mail', text: member.email || '' }),
+  );
+  bar.hidden = false;
+  document.body.classList.add('has-idbar');
+  setThemeColor(role);
+}
+
+/** Barva adresního pruhu prohlížeče / systémové lišty podle role. */
+function setThemeColor(role) {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const base = { member: '#070B14', dozor: '#04140F', vybor: '#0B0714' };
+  meta.setAttribute('content', role === 'superadmin' ? '#3B0416' : (base[role] || base.member));
+}

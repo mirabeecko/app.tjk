@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=37';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=37';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=39';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=39';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -109,6 +109,9 @@ function renderNav() {
   if (mobileMenu) mobileMenu.innerHTML = '';
   // Vzhled podle role: účet dozoru má odlišné barvy (na první pohled poznat)
   applyRoleTheme();
+  // Trvale viditelný pruh s CELÝM jménem a rolí přihlášeného profilu.
+  // Volá se při každém překreslení (tj. na každé obrazovce i po přihlášení).
+  renderIdentityBar();
 
   const isActive = (href) => hash.startsWith(href) && href !== '#/';
 
@@ -147,7 +150,16 @@ function renderNav() {
     topnav.append(el('a', { class: 'nav-btn' + (isActive(it.href) ? ' active' : ''), href: it.href, text: it.label }));
   }
   if (isLoggedIn()) {
-    topnav.append(el('a', { class: 'nav-btn cta', href: '#/profil' }, [ico('user', 15), ' ', me.member.firstName]));
+    // Chip s profilem: CELÉ jméno + zkratka role (křestní jméno nestačí)
+    topnav.append(el('a', {
+      class: 'nav-btn cta nav-me',
+      href: '#/profil',
+      title: `Přihlášený profil: ${memberFullName(me.member)} — ${roleLabel(me.member.role)} (${me.member.email || ''})`,
+    }, [
+      ico('user', 15),
+      el('span', { class: 'nav-me-name', text: memberFullName(me.member) }),
+      el('span', { class: 'nav-me-role', text: roleShort(me.member.role) }),
+    ]));
   } else {
     topnav.append(el('a', { class: 'nav-btn ghost-cta', href: '#/prihlaseni' }, [ico('key', 15), ' ', 'Přihlásit se']));
     topnav.append(el('a', { class: 'nav-btn cta', href: '#/registrace' }, [ico('edit', 15), ' ', 'Registrace']));
@@ -161,7 +173,7 @@ function renderNav() {
       {
         title: 'Účet',
         items: isLoggedIn()
-          ? [{ href: '#/profil', label: `Můj profil — ${me.member.firstName}`, icon: 'user' }]
+          ? [{ href: '#/profil', label: `Přihlášený profil: ${memberFullName(me.member)} — ${roleLabel(me.member.role)}`, icon: 'user', highlight: me.member.role === 'superadmin' ? 'owner' : (isDozor() ? 'dozor' : null) }]
               .concat(isDozor() ? [{ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' }] : [])
               .concat(isStaff() ? [{ href: '#/admin', label: 'Správa', icon: 'dashboard' }] : [])
               .concat(isSuperAdmin() ? [{ href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' }] : [])

@@ -20,9 +20,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/css/app.css?v=37" />
+  <link rel="stylesheet" href="/css/app.css?v=39" />
 </head>
 <body>
+  <!-- TRVALE VIDITELNÝ PRUH PŘIHLÁŠENÉHO PROFILU
+       Je součástí shellu, takže ho žádné zobrazení neodstraní: při testování
+       profilů je vždy a na každé obrazovce vidět CELÉ jméno + role + e-mail.
+       Naplňuje ho renderIdentityBar() v js/ui.js. -->
+  <div id="idbar" class="idbar" role="status" aria-live="polite" hidden></div>
   <div id="app">
     <!-- DESKTOP RAIL: značka + vertikální navigace -->
     <aside class="rail">
@@ -74,14 +79,14 @@
   <nav class="bottomnav" id="bottomnav" hidden></nav>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="/js/api.js?v=37"></script>
-  <script src="/js/ui.js?v=37"></script>
-  <script src="/js/czech.js?v=37"></script>
-  <script src="/js/views-public.js?v=37"></script>
-  <script src="/js/views-member.js?v=37"></script>
+  <script src="/js/api.js?v=39"></script>
+  <script src="/js/ui.js?v=39"></script>
+  <script src="/js/czech.js?v=39"></script>
+  <script src="/js/views-public.js?v=39"></script>
+  <script src="/js/views-member.js?v=39"></script>
   <!-- views-admin.js (16 kB) a views-dozor.js se načítají LENIVĚ až když je
        účet opravdu potřebuje (správa / dozor / vlastník). Běžný návštěvník
        tak nestahuje kód, který nikdy nepoužije — viz načtiSkript() v app.js. -->
-  <script src="/js/app.js?v=37"></script>
+  <script src="/js/app.js?v=39"></script>
 </body>
 </html>

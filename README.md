@@ -237,6 +237,24 @@ Ostatní role (dozor, výbor, člen) dostanou 403. Seed vytváří demo účet
 `miroslavbrozek@gmail.com` s rolí `superadmin` (idempotentně povýší i existující
 účet se stejným e-mailem).
 
+### Jak poznám, že jsem přihlášený jako vlastník (2026-09-27)
+
+Při testování se zakládá mnoho profilů, proto se přihlášený profil zobrazuje
+**trvale a na každé obrazovce** — v pruhu `#idbar` na horní hraně okna (součást
+shellu v `public/index.html`, plní ho `renderIdentityBar()` v `public/js/ui.js`).
+Pruh ukazuje **celé jméno** (křestní jméno k rozlišení profilů nestačí), roli
+a e-mail; u nepřihlášeného návštěvníka je skrytý. Stejné jméno nese i chip
+v navigaci (`.nav-me`) a položka „Přihlášený profil“ v mobilním menu.
+
+Role se pozná i podle barvy celého prostředí (`applyRoleTheme()`):
+
+| Role | Prostředí | Pruh profilu |
+|---|---|---|
+| člen | limetková (výchozí) | tmavý, limetkový odznak ČLEN |
+| dozor | zelená | zelený odznak DOZOR |
+| výbor | fialová | fialový odznak VÝBOR |
+| **superadmin** | **karmínová (celé prostředí — pozadí, lišty, akcenty, karty)** | **výstražně šrafovaný karmínový pruh** |
+
 ## Přidání další členské výhody / zařízení
 
 Aplikace je data-driven: nové zařízení (hala, posilovna, pronájem…) se přidá
