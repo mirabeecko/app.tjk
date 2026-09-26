@@ -1,17 +1,19 @@
 // sw.js — Service Worker: app shell cache + offline režim pro členskou kartu a provozní řád.
 'use strict';
 
-const CACHE = 'airbag-v32';
+const CACHE = 'airbag-v37';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/app.css?v=32',
-  '/js/api.js?v=32',
-  '/js/ui.js?v=32',
-  '/js/views-public.js?v=32',
-  '/js/views-member.js?v=32',
-  '/js/views-admin.js?v=32',
-  '/js/app.js?v=32',
+  '/css/app.css?v=37',
+  '/js/api.js?v=37',
+  '/js/ui.js?v=37',
+  '/js/czech.js?v=37',
+  '/js/views-public.js?v=37',
+  '/js/views-member.js?v=37',
+  // views-admin.js / views-dozor.js se načítají LENIVĚ (viz načtiSkript v app.js)
+  // → do pre-cache nepatří, jinak by každý stahoval kód, který nepoužije.
+  '/js/app.js?v=37',
   '/manifest.json',
   '/favicon.ico',
   '/favicon-16.png',
