@@ -502,3 +502,11 @@ CREATE INDEX IF NOT EXISTS idx_members_role          ON members (role);
 CREATE INDEX IF NOT EXISTS idx_members_status        ON members (status);
 CREATE INDEX IF NOT EXISTS idx_members_kind          ON members (membership_kind);
 CREATE INDEX IF NOT EXISTS idx_consents_member       ON consents (member_id);
+
+-- 7) METADATA APLIKACE (klíč/hodnota) — seed si sem ukládá otisk svých vstupů,
+--    aby se zbytečně nespouštěl při každém startu instance (viz src/seed.js).
+CREATE TABLE IF NOT EXISTS app_meta (
+  meta_key   TEXT PRIMARY KEY,
+  meta_value TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);

@@ -1953,6 +1953,59 @@ router.post('/superadmin/docs', A.requireSuperAdmin, asyncRoute(async (req, res)
 }));
 
 // ---------- rezervace (univerzální — dle zařízení) ----------
+// Upozornění na novou rezervaci: členovi (v aplikaci + e-mailem) a účtům
+// s právy dozoru/výboru/vlastníka (aby věděli, že na zařízení někdo přijde).
+// Vše je „best effort“ — selhání notifikace nesmí shodit vytvoření rezervace.
+function bookingWhenLabel(start, end) {
+  const d = String(start).slice(0, 10).split('-');
+  const from = String(start).slice(11, 16);
+  const to = String(end).slice(11, 16);
+  return `${Number(d[2])}. ${Number(d[1])}. ${d[0]}, ${from}–${to}`;
+}
+
+async function notifyBookingCreated(member, facility, start, end) {
+  const when = bookingWhenLabel(start, end);
+  const memberName = `${member.first_name} ${member.last_name}`;
+  const sign = '\n\nTělovýchovná jednota Krupka, z.s.';
+
+  // 1) člen — v aplikaci + e-mailem
+  try {
+    await D.Notifications.create({
+      memberId: member.id, type: 'booking_created', title: 'Rezervace potvrzena',
+      body: `${facility.name} — ${when}. U vstupu se prokážete QR členskou kartou.`,
+    });
+  } catch (e) { console.log('[notif] rezervace členovi:', e.message); }
+  try {
+    await mailer.sendEmail(member.id, member.email, `Rezervace potvrzena — TJ Krupka (${when})`,
+      `Dobrý den,\n\nvaše rezervace byla zaznamenána.\n\nZařízení: ${facility.name}\nTermín: ${when}\n\n`
+      + `U vstupu se prokážete QR členskou kartou v aplikaci app.tjkrupka.cz. `
+      + `Pokud se nemůžete dostavit, dejte prosím vědět dozorovi.${sign}`);
+  } catch (e) { console.log('[mail] rezervace členovi:', e.message); }
+
+  // 2) dozor / výbor / vlastník — upozornění, že někdo přijde
+  let staff = [];
+  try {
+    staff = (await D.Members.listAll())
+      .filter((x) => ['dozor', 'vybor', 'superadmin'].includes(x.role) && x.email && x.id !== member.id);
+  } catch (e) { console.log('[notif] seznam dozoru:', e.message); }
+
+  await Promise.all(staff.map(async (s) => {
+    try {
+      await D.Notifications.create({
+        memberId: s.id, type: 'booking_created', title: `Nová rezervace — ${when}`,
+        body: `${memberName} si rezervoval(a) ${facility.name}.`,
+      });
+    } catch (e) { console.log('[notif] rezervace dozorovi:', e.message); }
+    try {
+      await mailer.sendEmail(s.id, s.email, `Nová rezervace — ${memberName} (${when})`,
+        `Dobrý den,\n\n${memberName} si rezervoval(a) zařízení.\n\n`
+        + `Zařízení: ${facility.name}\nTermín: ${when}\n\nPřehled najdete v aplikaci app.tjkrupka.cz.${sign}`);
+    } catch (e) { console.log('[mail] rezervace dozorovi:', e.message); }
+  }));
+
+  return { when, notifiedStaff: staff.length };
+}
+
 router.get('/bookings', A.requireMember, asyncRoute(async (req, res) => {
   const date = (req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
   const code = (req.query.facility || 'airbag').slice(0, 40);
@@ -1978,7 +2031,13 @@ router.post('/bookings', A.requireMember, asyncRoute(async (req, res) => {
   const slot = slots.find((s) => s.start === start);
   if (!slot || slot.taken) return res.status(409).json({ error: 'OBSAZENO', message: 'Tento slot je už obsazený.' });
   const booking = await D.Bookings.create({ memberId: m.id, facilityId: facility.id, slotStart: start, slotEnd: end });
-  res.json({ ok: true, booking });
+  // Upozornění členovi (aplikace + e-mail) a dozoru (aplikace + e-mail).
+  // Dokončujeme PŘED odpovědí — serverless funkce se po odeslání odpovědi ukončí,
+  // takže „fire-and-forget“ by se nedoručil.
+  let notified = null;
+  try { notified = await notifyBookingCreated(m, facility, start, end); }
+  catch (e) { console.log('[notif] rezervace CHYBA', e.message); }
+  res.json({ ok: true, booking, notified: notified || undefined });
 }));
 
 // ---------- akce spolku + přihlášení na akci ----------

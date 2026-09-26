@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const D = require('./db');
 const X = require('./db-app');
 
@@ -84,29 +85,67 @@ async function seedMemberTypes() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// OTISK VSTUPŮ SEEDU — aby se seed zbytečně nespouštěl při každém startu
+// ---------------------------------------------------------------------------
+// Konstanty výše + obsah dokumentů v docs/. Když se nic nezměnilo, seed se
+// přeskočí. Dřív se ~50 dotazů poslalo při KAŽDÉM startu instance a Supabase
+// pooler má 200–800 ms na dotaz, takže první odpověď trvala 10–25 s.
+const DOCS_DIR = path.join(__dirname, '..', 'docs');
+const DOCS = [
+  // Službové dokumenty (AirBAG apod.)
+  { key: 'provozni_rad', file: 'provozni_rad.md', title: 'Provozní řád dopadové matrace' },
+  { key: 'cestne_prohlaseni', file: 'cestne_prohlaseni.md', title: 'Čestné prohlášení o zdravotní způsobilosti' },
+  { key: 'gdpr', file: 'gdpr.md', title: 'Souhlas se zpracováním osobních údajů (GDPR)' },
+  // POUČENÍ O RIZICÍCH (2026-09-28) nahrazuje původní „Vzdání se práva na
+  // náhradu újmy (§ 2925 OZ)“ — text vzdání se práva zůstává v auditní stopě.
+  { key: 'pouceni_rizika', file: 'pouceni_rizika.md', title: 'Poučení o rizicích a potvrzení pravidel účasti' },
+  // Obsah PRAKTICKÉ INSTRUKTÁŽE (verzovaný) — záznam o instruktáži se váže
+  // na konkrétní verzi: nová verze = nutná nová instruktáž.
+  { key: 'instruktaz_airbag', file: 'instruktaz_airbag.md', title: 'Instruktáž před použitím dopadové matrace' },
+  // Dokumenty k ČLENSTVÍ (konfigurovatelné administrátorem — reálné znění viz soubory)
+  { key: 'stanovy', file: 'membership_stanovy.md', title: 'Stanovy TJ Krupka, z.s. (členství)' },
+  // SAMOSTATNÝ souhlas zákonného zástupce S ÚČASTÍ nezletilého
+  { key: 'guardian_souhlas', file: 'guardian_souhlas.md', title: 'Souhlas zákonného zástupce s účastí nezletilého' },
+];
+
+function seedFingerprint() {
+  const parts = [JSON.stringify([MEMBER_TYPES, PRODUCTS, MERCH, DEMO_MEMBERS])];
+  for (const d of DOCS) {
+    let hash = 'CHYBI';
+    try {
+      hash = crypto.createHash('sha256')
+        .update(fs.readFileSync(path.join(DOCS_DIR, d.file), 'utf8'))
+        .digest('hex').slice(0, 16);
+    } catch (e) { /* soubor chybí → otisk se tím změní */ }
+    parts.push(`${d.key}|${d.title}|${hash}`);
+  }
+  return crypto.createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 40);
+}
+
+const SEED_META_KEY = 'seed_fingerprint';
+// Tabulka app_meta nemusí existovat (starší DB) — pak se seed prostě spustí
+// jako dřív a jen se to zaloguje; nikdy to nesmí shodit aplikaci.
+async function readSeedFingerprint() {
+  try {
+    const row = await D.raw.get(`SELECT meta_value FROM ${T('app_meta')} WHERE meta_key = ?`, [SEED_META_KEY]);
+    return row ? row.meta_value : null;
+  } catch (e) { return null; }
+}
+async function writeSeedFingerprint(value) {
+  try {
+    await D.raw.run(
+      `INSERT INTO ${T('app_meta')} (meta_key, meta_value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT (meta_key) DO UPDATE SET meta_value = excluded.meta_value, updated_at = excluded.updated_at`,
+      [SEED_META_KEY, value, D.now()]
+    );
+  } catch (e) { console.log('[seed] otisk neuložen:', e.message); }
+}
+
 async function seedDocs() {
-  const docsDir = path.join(__dirname, '..', 'docs');
-  const docs = [
-    // Službové dokumenty (AirBAG apod.)
-    { key: 'provozni_rad', file: 'provozni_rad.md', title: 'Provozní řád dopadové matrace' },
-    { key: 'cestne_prohlaseni', file: 'cestne_prohlaseni.md', title: 'Čestné prohlášení o zdravotní způsobilosti' },
-    { key: 'gdpr', file: 'gdpr.md', title: 'Souhlas se zpracováním osobních údajů (GDPR)' },
-    // POUČENÍ O RIZICÍCH (2026-09-28) nahrazuje původní „Vzdání se práva na
-    // náhradu újmy (§ 2925 OZ)“. Vzdání se práva na náhradu újmy bylo z aplikace
-    // ODSTRANĚNO — nový dokument nic takového neobsahuje a výslovně uvádí, že
-    // potvrzení neomezuje zákonná práva účastníka při vzniku újmy.
-    { key: 'pouceni_rizika', file: 'pouceni_rizika.md', title: 'Poučení o rizicích a potvrzení pravidel účasti' },
-    // Obsah PRAKTICKÉ INSTRUKTÁŽE (verzovaný) — záznam o instruktáži se váže
-    // na konkrétní verzi: nová verze = nutná nová instruktáž.
-    { key: 'instruktaz_airbag', file: 'instruktaz_airbag.md', title: 'Instruktáž před použitím dopadové matrace' },
-    // Dokumenty k ČLENSTVÍ (konfigurovatelné administrátorem — reálné znění viz soubory)
-    { key: 'stanovy', file: 'membership_stanovy.md', title: 'Stanovy TJ Krupka, z.s. (členství)' },
-    // SAMOSTATNÝ souhlas zákonného zástupce S ÚČASTÍ nezletilého (oddělený od
-    // potvrzení, které činí sám nezletilý účastník) — bez vzdání se práv dítěte.
-    { key: 'guardian_souhlas', file: 'guardian_souhlas.md', title: 'Souhlas zákonného zástupce s účastí nezletilého' },
-  ];
+  const docs = DOCS;
   for (const doc of docs) {
-    const content = fs.readFileSync(path.join(docsDir, doc.file), 'utf8');
+    const content = fs.readFileSync(path.join(DOCS_DIR, doc.file), 'utf8');
     const existing = await D.DocVersions.latest(doc.key);
     if (!existing) {
       await D.DocVersions.create(doc.key, 1, doc.title, content, '2026-08-15T00:00:00.000Z');
@@ -331,6 +370,15 @@ async function seedProductVariants() {
 }
 
 async function seed() {
+  const fingerprint = seedFingerprint();
+  const stored = await readSeedFingerprint();
+  if (stored === fingerprint) {
+    // Vstupy seedu (konstanty + texty dokumentů) se nezměnily → přeskočíme
+    // těžkou část. Datumy demo akcí ale držíme vůči dnešku i tak — jinak akce
+    // zastarají do minulosti a přihlašování by vracelo 409 ZACALO.
+    await seedEvents();
+    return { skipped: true };
+  }
   await seedMemberTypes();
   await seedDocs();
   await seedDemoMembers();
@@ -339,6 +387,8 @@ async function seed() {
   await seedEvents();
   await seedProducts();
   await seedProductVariants();
+  await writeSeedFingerprint(fingerprint);
+  return { skipped: false };
 }
 
 module.exports = { seed, VALIDITY_DAYS };
