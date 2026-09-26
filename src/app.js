@@ -77,6 +77,11 @@ function buildApp() {
 
   app.use('/api', routes);
 
+  // DOZOR + SUPERADMIN rozšíření (QR kontrola s úplnými údaji, pozvánky dozoru,
+  // přehled členské základny, blokace účtů). Vlastní router = routes.js zůstává
+  // čitelný a logika členství se sdílí přes routes.shared (viz routes-dozor.js).
+  app.use('/api', require('./routes-dozor'));
+
   // statické soubory PWA
   app.use(express.static(PUBLIC_DIR, {
     index: 'index.html',
@@ -86,6 +91,17 @@ function buildApp() {
       }
       if (filePath.endsWith('manifest.json')) {
         res.setHeader('Cache-Control', 'no-cache');
+      }
+      // VÝKON: JS/CSS/obrázky se odkazují s verzí (?v=NN), takže se dají držet
+      // dlouho v prohlížeči — bez toho se opakovaně stahovaly při každé navigaci.
+      if (/\.(js|css|png|jpg|jpeg|svg|webp|ico|woff2?)$/i.test(filePath) &&
+          !filePath.endsWith('sw.js')) {
+        res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
+      }
+      // POZOR: HTML (app shell) se cachovat NESMÍ — jinak se uživateli drží stará
+      // verze stránky i s odkazy na staré JS/CSS a aplikace se „neaktualizuje“.
+      if (filePath.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       }
     },
   }));

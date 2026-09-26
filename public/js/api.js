@@ -29,12 +29,24 @@ const API = {
 
 // Session cache (načteno při startu)
 let me = null;
+// VÝKON: při startu aplikace se /me volalo dvakrát (bootstrap + router) a každé
+// volání znamenalo další dotaz do DB a nový request. Držíme proto jednu sdílenou
+// probíhající Promise (souběžná volání se slijí do jednoho requestu) a výsledek
+// krátce cachujeme, aby navigace mezi pohledy netahala data znovu.
+let meInFlight = null;
+let meLoadedAt = 0;
+const ME_TTL_MS = 15000;
 
-async function refreshMe() {
-  try {
-    me = await API.get('/me');
-  } catch (e) {
-    me = null;
+async function refreshMe({ force = false } = {}) {
+  const fresh = force || (Date.now() - meLoadedAt) > ME_TTL_MS;
+  if (fresh) {
+    if (!meInFlight) {
+      meInFlight = API.get('/me')
+        .then((res) => { me = res; meLoadedAt = Date.now(); return me; })
+        .catch(() => { me = null; return null; })
+        .finally(() => { meInFlight = null; });
+    }
+    return meInFlight;
   }
   return me;
 }
@@ -42,6 +54,13 @@ async function refreshMe() {
 function isLoggedIn() { return !!me; }
 function currentRole() { return me && me.member ? me.member.role : null; }
 function isStaff() { const r = currentRole(); return r === 'dozor' || r === 'vybor' || r === 'superadmin'; }
+// Práva dozoru (načítá server v /me jako canDozor) — pozor: účet dozoru
+// NEMUSÍ být členem, takže se nesmí odvozovat z členství.
+function isDozor() {
+  if (me && typeof me.canDozor === 'boolean') return me.canDozor;
+  return isStaff();
+}
+function currentMe() { return me; }
 // Vlastník aplikace (jediný s přístupem do superadmin sekce) — e-mail je pojistka
 function isSuperAdmin() {
   return !!(me && me.member && me.member.role === 'superadmin' && me.member.email === 'miroslavbrozek@gmail.com');

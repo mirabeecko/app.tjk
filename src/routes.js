@@ -13,9 +13,13 @@ const Pwd = require('./password');
 const payments = require('./payments');
 const S = require('./supabase-sync');
 const E = require('./eligibility');
+const EVD = require('./evidence');
 const { VALIDITY_DAYS } = require('./seed');
 
 const router = express.Router();
+
+// Kvalifikace názvů tabulek pro syrové agregační dotazy (postgres → app.<tabulka>).
+const TBL = (n) => (D.driver === 'postgres' ? `app.${n}` : n);
 
 const { rateLimit } = require('./rate-limit');
 const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'login' });
@@ -248,19 +252,50 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
   });
 }));
 
-// ---------- veřejné: dokumenty (aktuální verze) ----------
+// ---------- veřejné: právní dokumenty ----------
+// VÝKON: dřív se pro každý klíč volat samostatný dotaz (N+1) a posílal se CELÝ
+// text dokumentů (stanovy ~24 kB) při každém otevření podmínek. Teď jeden dotaz
+// + krátká serverová cache + možnost poslat jen metadata (?slim=1).
+let _docsCache = null;
+let _docsCacheAt = 0;
+const DOCS_CACHE_MS = 60000;
+
+async function latestDocVersions() {
+  const t = Date.now();
+  if (_docsCache && (t - _docsCacheAt) < DOCS_CACHE_MS) return _docsCache;
+  const rows = D.driver === 'postgres'
+    // DISTINCT ON = jedna řádka na doc_key (nejvyšší verze) jedním dotazem
+    ? await D.raw.all(
+      `SELECT DISTINCT ON (doc_key) * FROM ${TBL('doc_versions')} ORDER BY doc_key, version DESC`
+    )
+    : await D.raw.all(
+      `SELECT d.* FROM ${TBL('doc_versions')} d
+        WHERE d.version = (SELECT MAX(x.version) FROM ${TBL('doc_versions')} x WHERE x.doc_key = d.doc_key)`
+    );
+  _docsCache = rows;
+  _docsCacheAt = t;
+  return rows;
+}
+
+/** Invalidace cache dokumentů (volat po vytvoření nové verze dokumentu). */
+function invalidateDocsCache() { _docsCache = null; _docsCacheAt = 0; }
+
 router.get('/docs', asyncRoute(async (req, res) => {
-  const all = await D.DocVersions.latestAll();
+  const slim = req.query.slim === '1';
+  const all = await latestDocVersions();
   const docs = all.map((d) => ({
     id: d.id,
     docKey: d.doc_key,
     version: d.version,
     title: d.title,
-    content: d.content,
+    // Text dokumentu je největší část odpovědi — posíláme ho jen když je potřeba
+    ...(slim ? {} : { content: d.content }),
     contentHash: d.content_hash,
     effectiveFrom: d.effective_from,
   }));
-  res.json({ docs });
+  // Odpověď je pro všechny stejná a dlouho platná → ať ji drží CDN i prohlížeč.
+  res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+  res.json({ docs, slim });
 }));
 
 // ---------- veřejná konfigurace (režim e-mailů + plateb + ceny pro UI) ----------
@@ -315,6 +350,15 @@ router.post('/login/password', loginLimiter, asyncRoute(async (req, res) => {
   if (!member) return res.status(401).json({ error: 'NEPLATNE_PRIHLASENI', message: 'Nesprávný e-mail nebo heslo.' });
   if (!Pwd.verify(password, member.password_hash)) {
     return res.status(401).json({ error: 'NEPLATNE_PRIHLASENI', message: 'Nesprávný e-mail nebo heslo.' });
+  }
+  // Pozastavený účet se nepřihlásí (superadmin může přístup kdykoliv zrušit/obnovit).
+  if (Number(member.blocked) === 1) {
+    return res.status(403).json({
+      error: 'UCET_POZASTAVEN',
+      message: member.blocked_reason
+        ? `Přístup do účtu byl pozastaven: ${member.blocked_reason}`
+        : 'Přístup do tohoto účtu byl pozastaven vlastníkem aplikace.',
+    });
   }
   const token = await D.Sessions.create(member.id, member.role);
   A.setSessionCookie(res, token);
@@ -492,6 +536,18 @@ router.get('/me', A.requireMember, asyncRoute(async (req, res) => {
     ageType: est.ageType,                     // ADULT | MINOR
     membershipStatus: est.membershipStatus,   // MEMBER | MEMBERSHIP_EXPIRED | MEMBERSHIP_PENDING | NON_MEMBER
     kind,
+    // ---- PRÁVA ÚČTU (2026-09-27) ----
+    // Frontend podle toho zobrazuje menu: členům běžné položky, účtům s právy
+    // dozoru navíc zvýrazněnou položku „Dozor“, vlastníkovi „Správa základny“.
+    role: m.role,                                    // member | dozor | vybor | superadmin
+    roleLabel: ({ member: 'Člen', dozor: 'Dozor', vybor: 'Výbor', superadmin: 'Vlastník' })[m.role] || m.role,
+    canDozor: ['dozor', 'vybor', 'superadmin'].includes(m.role),
+    canSuperAdmin: A.isSuperAdmin(m),
+    blocked: Number(m.blocked) === 1,
+    blockedReason: m.blocked_reason || null,
+    membershipKind: m.membership_kind || 'sportovni',
+    membershipKindLabel: m.membership_kind === 'radne' ? 'Řádné členství' : 'Sportovní členství',
+    membershipRecordedSource: m.membership_kind_source || 'app.tjkrupka.cz',
     access: await hasAccess(m),
     status: effectiveStatus(m),
     missingConsents: await memberAllConsents(m.id),
@@ -640,6 +696,52 @@ router.post('/consent', A.requireMember, asyncRoute(async (req, res) => {
   });
 }));
 
+// ---------- DŮKAZNÍ VRSTVA SOUHLASŮ: protokol, znění, ověření integrity ----------
+// „Když se něco stane“ musí být dohledatelné, co člen podepsal — přesné znění,
+// verzi, čas, identitu a IP. Protokol je tisknutelný doklad (i bez aplikace).
+const DOC_ADMIN_ROLES = ['dozor', 'vybor', 'superadmin'];
+function canSeeMemberDocs(req, memberId) {
+  return String(req.member.id) === String(memberId) || DOC_ADMIN_ROLES.includes(req.member.role);
+}
+
+// JSON: podepsané dokumenty člena včetně PŘESNÉHO znění podepsané verze + ověření otisku
+router.get('/documents/signed/:memberId', A.requireMember, asyncRoute(async (req, res) => {
+  const m = await D.Members.getById(req.params.memberId);
+  if (!m) return res.status(404).json({ error: 'NENALEZENO', message: 'Člen nebyl nalezen.' });
+  if (!canSeeMemberDocs(req, m.id)) {
+    return res.status(403).json({ error: 'NEDOSTATECNA_PRAVA', message: 'Nemáte právo na dokumenty tohoto člena.' });
+  }
+  res.json(await EVD.evidenceBundle(m));
+}));
+
+// HTML: PROTOKOL O ELEKTRONICKÉM SOUHLASU — k tisku / uložení jako PDF / do spisu
+router.get('/documents/protocol/:memberId', A.requireMember, asyncRoute(async (req, res) => {
+  const m = await D.Members.getById(req.params.memberId);
+  if (!m) return res.status(404).type('text/plain').send('Člen nebyl nalezen.');
+  if (!canSeeMemberDocs(req, m.id)) {
+    return res.status(403).type('text/plain').send('Nemáte právo na dokumenty tohoto člena.');
+  }
+  const bundle = await EVD.evidenceBundle(m);
+  const nonce = require('crypto').randomBytes(12).toString('base64');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  // Tato stránka je samostatný doklad — potřebuje jen vlastní styl a tlačítko
+  // pro tisk, proto má vlastní (těsnější) CSP s nonce. Nic se z ní neodesílá.
+  res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src data:`);
+  if (req.query.download) {
+    res.setHeader('Content-Disposition', `attachment; filename="${EVD.protocolFileName(bundle)}"`);
+  }
+  res.send(EVD.protocolHtml(bundle, {
+    nonce,
+    issuedBy: `${req.member.first_name || ''} ${req.member.last_name || ''}`.trim() + ` (${req.member.email}, role ${req.member.role})`,
+  }));
+}));
+
+// Souhrnná kontrola integrity VŠECH souhlasů (dozor / výbor / vlastník)
+router.get('/documents/verify', A.requireRole(...DOC_ADMIN_ROLES), asyncRoute(async (req, res) => {
+  res.json(await EVD.verifyAll());
+}));
+
 // Ověření platnosti guardian odkazu (status pending + neexpirovaný token)
 function guardianTokenValid(m) {
   if (!m || m.guardian_status !== 'pending' || !m.guardian_token) return false;
@@ -647,9 +749,21 @@ function guardianTokenValid(m) {
   return true;
 }
 
+// Token zákonného zástupce je v DB typu uuid — náhodný/poškozený odkaz
+// (např. „xyz“) by v Postgresu shodil dotaz na „invalid input syntax for type
+// uuid“ a vrátil 500. Formát kontrolujeme PŘED dotazem a vracíme 404.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(v) {
+  return UUID_RE.test(String(v || ''));
+}
+async function findMemberByGuardianToken(token) {
+  if (!isUuid(token)) return null;
+  return D.Members.getByGuardianToken(token);
+}
+
 // ---------- E-SOUHLAS zákonného zástupce (veřejný odkaz) ----------
 router.get('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => {
-  const m = await D.Members.getByGuardianToken(req.params.token);
+  const m = await findMemberByGuardianToken(req.params.token);
   if (!guardianTokenValid(m)) {
     return res.status(404).json({ error: 'NEPLATNY_ODKAZ', message: 'Odkaz je neplatný, vypršel nebo už byl použit.' });
   }
@@ -665,7 +779,7 @@ router.get('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => {
 }));
 
 router.post('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => {
-  const m = await D.Members.getByGuardianToken(req.params.token);
+  const m = await findMemberByGuardianToken(req.params.token);
   if (!guardianTokenValid(m)) {
     return res.status(404).json({ error: 'NEPLATNY_ODKAZ', message: 'Odkaz je neplatný, vypršel nebo už byl použit.' });
   }
@@ -728,6 +842,10 @@ async function activateMembership(paid) {
     // Jednorázový vstup → oprávnění (entitlement); nemění členskou platnost!
     const product = paid.product_code ? await D.Products.getByCode(paid.product_code) : null;
     if (!product) return null;
+    // Idempotence: platba se může potvrdit dvakrát (webhook + aktivní ověření
+    // u Stripe) — pro jednu platbu vzniká právě JEDNO oprávnění.
+    const already = (await D.Entitlements.listForMember(m.id)).find((e) => e.payment_id === paid.id);
+    if (already) return already;
     // navazování: další nákup stejného produktu prodlužuje od konce aktuálního oprávnění
     const list = await D.Entitlements.listForMember(m.id);
     const activeEnds = list
@@ -760,6 +878,31 @@ async function activateMembership(paid) {
   const cardToken = D.uuid().replace(/-/g, '').slice(0, 20);
   await D.Cards.upsert(m.id, `TJK:${m.member_no}:${cardToken}`);
   // aktivní člen → sync platnosti do Supabase evidence (fire-and-forget)
+  S.upsertMember(member).catch((e) => console.log('[supabase-sync] CHYBA', e.message));
+  return member;
+}
+
+// Prodloužení ročního členství z OBNOVOVACÍ faktury předplatného (invoice.paid).
+// Idempotentní: jedna faktura = jedno prodloužení (evidenci drží payments.gateway_ref).
+// Platnost se navazuje na konec té současné, takže se platnosti nepřekrývají.
+async function extendMembershipFromRenewal(renewal) {
+  if (!renewal || !renewal.memberId || !renewal.invoiceId) return null;
+  const dup = await D.raw.get(`SELECT id FROM ${TBL('payments')} WHERE gateway_ref = ?`, [renewal.invoiceId]);
+  if (dup) return null; // už zpracováno — webhook může dorazit víckrát
+  const m = await D.Members.getById(renewal.memberId);
+  if (!m) return null;
+  const days = VALIDITY_DAYS[m.membership_type] || 365;
+  const current = m.valid_until ? new Date(m.valid_until) : null;
+  const base = current && current.getTime() > Date.now() ? current : new Date();
+  const until = new Date(base.getTime() + days * 86400 * 1000);
+  // obnovená platba se eviduje (idempotence + je vidět v historii člena)
+  const pay = await D.Payments.create({
+    memberId: m.id, amountCzk: renewal.amountCzk || 0, purpose: 'prispevek', gateway: 'stripe',
+  });
+  await D.Payments.markPaid(pay.id, renewal.invoiceId);
+  const member = await D.Members.update(m.id, {
+    status: 'active', valid_from: new Date().toISOString(), valid_until: until.toISOString(),
+  });
   S.upsertMember(member).catch((e) => console.log('[supabase-sync] CHYBA', e.message));
   return member;
 }
@@ -900,10 +1043,25 @@ router.post('/payments/:id/fail', A.requireMember, asyncRoute(async (req, res) =
 }));
 
 router.get('/payments/:id/receipt', A.requireMember, asyncRoute(async (req, res) => {
-  const p = await D.Payments.getById(req.params.id);
+  let p = await D.Payments.getById(req.params.id);
   if (!p) return res.status(404).json({ error: 'NENALEZENO' });
   if (p.member_id !== req.member.id && req.member.role === 'member') {
     return res.status(403).json({ error: 'NEDOSTATECNA_PRAVA' });
+  }
+  // Fallback pro Stripe: pokud platbu dosud nepotvrdil webhook, ověříme stav
+  // přímo u Stripe (podle gateway_ref = Checkout Session id) a při zaplacení
+  // členství/vstup AKTIVUJEME. Bez tohoto by při nezaregistrovaném webhooku
+  // zůstal člen po zaplacení trvale v „payment_pending“.
+  if (p.status !== 'paid') {
+    try {
+      const verified = await payments.verifyStripePayment(p);
+      if (verified && verified.status === 'paid') {
+        p = verified;
+        await activateMembership(verified);
+      }
+    } catch (err) {
+      console.log('[stripe] ověření platby selhalo:', err.message);
+    }
   }
   if (p.status !== 'paid') return res.status(409).json({ error: 'NEZAPLACENO', message: 'Platba nebyla uhrazena.' });
   const m = await D.Members.getById(p.member_id);
@@ -911,19 +1069,27 @@ router.get('/payments/:id/receipt', A.requireMember, asyncRoute(async (req, res)
     receiptNo: p.receipt_no, paidAt: p.paid_at, amountCzk: p.amount_czk, purpose: p.purpose,
     memberName: `${m.first_name} ${m.last_name}`, memberId: m.id, memberNo: m.member_no,
     issuedBy: 'Tělovýchovná jednota Krupka, z.s., IČO 46070516',
-    note: 'Potvrzení o úhradě — Tělovýchovná jednota Krupka, z.s. (v testovacím režimu bez právní účinnosti).',
+    note: p.gateway === 'test'
+      ? 'Potvrzení o úhradě — Tělovýchovná jednota Krupka, z.s. (testovací režim — bez platební účinnosti).'
+      : 'Potvrzení o úhradě — Tělovýchovná jednota Krupka, z.s. Doklad slouží jako potvrzení o zaplacení členského příspěvku / vstupu.',
   });
 }));
 
 // ---------- Stripe webhook (raw body — musí být montován PŘED express.json) ----------
-// Zpracovává checkout.session.completed: ověří podpis (fail-closed), označí
-// platbu jako zaplacenou a AKTIVUJE členství (stejná logika jako test mode).
+// Zpracovává:
+//   checkout.session.completed → označí platbu zaplacenou a aktivuje členství/vstup
+//   invoice.paid               → obnovená roční platba předplatného → prodlouží členství
+// Podpis se ověřuje fail-closed.
 const webhookRouter = express.Router();
 webhookRouter.post('/payments/webhook', express.raw({ type: 'application/json', limit: '1mb' }), asyncRoute(async (req, res) => {
   const result = await payments.handleWebhook(req, req.body);
   if (result && result.paid) {
     // aktivace členství / denního vstupu (vrací member nebo null pro merch)
     await activateMembership(result.paid);
+  }
+  if (result && result.renewal) {
+    // roční členství je předplatné — obnovená platba prodlužuje platnost
+    await extendMembershipFromRenewal(result.renewal);
   }
   res.status(result.status || 200).json(result);
 }));
@@ -1016,20 +1182,34 @@ router.post('/check-card', A.requireRole('dozor', 'vybor', 'superadmin'), asyncR
 }));
 
 // ---------- admin (dozor / výbor / superadmin) ----------
+// Seznam členů a statistiky vidí POUZE superadmin (vlastník) — dozor a výbor
+// mají jen kontrolu QR karty (viz views-admin.js › viewAdmin), proto zde
+// zůstává requireSuperAdmin.
 router.get('/admin/members', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const all = await D.Members.listAll();
+  // Hromadné agregace místo dotazu na každého člena (N+1 → 2 dotazy).
+  const consentCounts = new Map();
+  for (const r of await D.raw.all(`SELECT member_id, COUNT(*) AS c FROM ${TBL('consents')} GROUP BY member_id`)) {
+    consentCounts.set(String(r.member_id), Number(r.c));
+  }
+  const paidSet = new Set();
+  for (const r of await D.raw.all(
+    `SELECT DISTINCT member_id FROM ${TBL('payments')} WHERE purpose = 'prispevek' AND status = 'paid'`
+  )) {
+    paidSet.add(String(r.member_id));
+  }
   const rows = [];
   for (const m of all) {
-    const consents = await D.Consents.listForMember(m.id);
-    const pays = await D.Payments.listForMember(m.id);
     rows.push({
       id: m.id, memberNo: m.member_no, name: `${m.first_name} ${m.last_name}`,
       birthDate: m.birth_date, email: m.email, membershipType: m.membership_type,
+      membershipKind: m.membership_kind, gender: m.gender,
       role: m.role, status: effectiveStatus(m),
       guardianStatus: m.guardian_status,
-      consentCount: consents.length, consentOk: (await memberAllConsents(m.id)).length === 0,
+      consentCount: consentCounts.get(String(m.id)) || 0,
+      consentOk: (await memberAllConsents(m.id)).length === 0,
       guardianOk: m.guardian_status !== 'pending' || (await guardianAllConsents(m.id)).length === 0,
-      paid: pays.some((p) => p.status === 'paid'),
+      paid: paidSet.has(String(m.id)),
       validUntil: m.valid_until,
       createdAt: m.created_at,
     });
@@ -1149,6 +1329,11 @@ router.get('/products', asyncRoute(async (req, res) => {
     const allVariants = await D.ProductVariants.listForProduct(p.id);
     const hasMemberVariant = allVariants.some((v) => v.active && v.audience === 'MEMBER');
     const hasPublicVariant = allVariants.some((v) => v.active && v.audience === 'PUBLIC');
+    // Marketingové ceny OBOU variant (bez vlivu na oprávnění): stránka /platba je
+    // potřebuje pro srozumitelné vysvětlení výhod členství (člen 300 Kč / nečlen 600 Kč).
+    // Závazná cena, kterou uživatel skutečně zaplatí, je vždy `price` výše.
+    const memberVar = allVariants.find((v) => v.active && v.audience === 'MEMBER');
+    const publicVar = allVariants.find((v) => v.active && v.audience === 'PUBLIC');
     products.push({
       code: p.code,
       name: p.name,
@@ -1164,6 +1349,9 @@ router.get('/products', asyncRoute(async (req, res) => {
       // marketingové rozlišení (bez ceny): existuje členská varianta?
       hasMemberVariant,
       hasPublicVariant,
+      // ceny obou variant pro srovnání v UI (může být null)
+      memberPrice: memberVar ? memberVar.price_czk : null,
+      publicPrice: publicVar ? publicVar.price_czk : null,
     });
   }
   res.json({
@@ -1197,9 +1385,23 @@ router.get('/facilities', asyncRoute(async (req, res) => {
 router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, res) => {
   const all = await D.Members.listAll();
   const ev = await S.listEvidenceMembers().catch((e) => ({ ok: false, error: e.message, members: [] }));
+  // Hromadné agregace (2 dotazy místo 2×N) — přehled musí být rychlý a aktuální
+  // i s desítkami členů (dřív N+1 dotaz na člena → 13 s u 4 členů).
+  const consentCounts = new Map();
+  for (const r of await D.raw.all(`SELECT member_id, COUNT(*) AS c FROM ${TBL('consents')} GROUP BY member_id`)) {
+    consentCounts.set(String(r.member_id), Number(r.c));
+  }
+  const paidSet = new Set();
+  for (const r of await D.raw.all(
+    `SELECT DISTINCT member_id FROM ${TBL('payments')} WHERE purpose = 'prispevek' AND status = 'paid'`
+  )) {
+    paidSet.add(String(r.member_id));
+  }
+  const types = new Map();
+  for (const t of await D.MemberTypes.list()) types.set(t.code, t);
   const rows = [];
   for (const m of all) {
-    const type = await D.MemberTypes.get(m.membership_type);
+    const type = types.get(m.membership_type);
     rows.push({
       id: m.id,
       memberNo: m.member_no,
@@ -1214,7 +1416,9 @@ router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, re
       city: m.city,
       zip: m.zip,
       membershipType: m.membership_type,
+      membershipKind: m.membership_kind,               // sportovni | radne (pro grafy a přehled)
       membershipLabel: (type || {}).label || m.membership_type,
+      gender: m.gender,                                // muz | zena | null (pro statistiky)
       role: m.role,
       status: m.status,
       validFrom: m.valid_from,
@@ -1225,8 +1429,8 @@ router.get('/superadmin/members', A.requireSuperAdmin, asyncRoute(async (req, re
       guardianPhone: m.guardian_phone,
       guardianStatus: m.guardian_status,
       guardianGrantedAt: m.guardian_granted_at,
-      consentsCount: await D.Consents.countForMember(m.id),
-      paid: (await D.Payments.countPaidContributionsForMember(m.id)) > 0,
+      consentsCount: consentCounts.get(String(m.id)) || 0,
+      paid: paidSet.has(String(m.id)),
       createdAt: m.created_at,
       updatedAt: m.updated_at,
     });
@@ -1571,3 +1775,18 @@ module.exports = router;
 // Webhook router (raw body) se montuje v server.js PŘED express.json —
 // Stripe podepisuje přesně původní payload, takže nesmí projít JSON parserem.
 module.exports.webhookRouter = webhookRouter;
+
+// ---------------------------------------------------------------------------
+// Sdílené helpery pro navazující routery (routes-dozor.js) — aby se logika
+// členství a aktivace po platbě NEduplikovala na dvou místech (riziko rozjetí).
+// ---------------------------------------------------------------------------
+module.exports.shared = {
+  effectiveStatus,
+  isClubMember,
+  hasAccess,
+  userKind,
+  activateMembership,
+  canPay,
+  asyncRoute,
+  TBL,
+};

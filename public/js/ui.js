@@ -130,6 +130,18 @@ const MEMBERSHIP_LABEL = {
   zakladni: 'Dospělý (18+)', rodinne: 'Dospělý (18+)', podporovatel: 'Dospělý (18+)', vikend: 'Dospělý (18+)', tyden: 'Dospělý (18+)',
 };
 
+// Kategorie členství se určuje POUZE z věku — MUSÍ být shodná s backendem
+// (src/routes.js › membershipTypeForAge). Dřív tu funkce chyběla a registrační
+// stránka házela "membershipTypeForAge is not defined" → nezobrazila kategorii
+// a u nezletilých vůbec neotevřela formulář zákonného zástupce.
+function membershipTypeForAge(age) {
+  if (age === null || age === undefined || !Number.isFinite(Number(age)) || Number(age) < 0) return null;
+  const a = Number(age);
+  if (a < 15) return 'dite';
+  if (a < 18) return 'mladez';
+  return 'dospele';
+}
+
 function escAttr(s) { return esc(s); }
 
 // čte formulář dle name atributů
@@ -156,4 +168,27 @@ function fieldError(form, name, msg) {
 
 function clearFieldErrors(form) {
   $$('.field-error', form).forEach((e) => e.remove());
+}
+
+/* ---------------------------------------------------------------------------
+ * TÉMA PODLE ROLE (2026-09-27)
+ * Musí být v základním (eager) kódu — renderNav() ho volá pro VŠECHNY
+ * uživatele, i když si dozorový kód dotahují až na vyžádání. Kdyby funkce
+ * žila v lenivě načítaném souboru, spadl by start aplikace (ReferenceError).
+ * ------------------------------------------------------------------------- */
+function applyRoleTheme() {
+  const r = (typeof currentRole === 'function') ? currentRole() : null;
+  document.body.classList.remove('role-dozor', 'role-superadmin', 'role-vybor');
+  if (r === 'dozor') document.body.classList.add('role-dozor');
+  else if (r === 'vybor') document.body.classList.add('role-vybor');
+  else if (r === 'superadmin') document.body.classList.add('role-superadmin');
+}
+
+/** Odznak role (DOZOR / VÝBOR / VLASTNÍK) — pro nadpisy stránek. */
+function roleBadge() {
+  const r = (typeof currentRole === 'function') ? currentRole() : null;
+  if (r === 'dozor') return el('span', { class: 'role-badge dozor', text: 'DOZOR' });
+  if (r === 'vybor') return el('span', { class: 'role-badge vybor', text: 'VÝBOR' });
+  if (r === 'superadmin') return el('span', { class: 'role-badge owner', text: 'VLASTNÍK' });
+  return null;
 }

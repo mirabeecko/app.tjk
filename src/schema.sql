@@ -247,3 +247,78 @@ CREATE TABLE IF NOT EXISTS product_variants (
   created_at    TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants (product_id, active);
+
+-- ===========================================================================
+-- ROZŠÍŘENÍ 2026-09-27 — vstupy, audit členství, pozvánky dozoru, fotky
+-- (1:1 se Supabase migrací 20260927_airbag_entries_dozor_audit.sql)
+-- ===========================================================================
+
+-- 1) VSTUPY NA AIRBAG (členové i nečlenové) — surová data pro analýzy
+CREATE TABLE IF NOT EXISTS entries (
+  id               TEXT PRIMARY KEY,
+  facility_code    TEXT NOT NULL DEFAULT 'airbag',
+  member_id        TEXT,                            -- NULL = nečlen / host
+  person_name      TEXT NOT NULL DEFAULT '',
+  person_no        INTEGER,
+  kind             TEXT NOT NULL DEFAULT 'neclen',   -- clen | neclen
+  entitlement_kind TEXT,                            -- membership | entitlement | none
+  access_ok        INTEGER NOT NULL DEFAULT 1,
+  reason           TEXT NOT NULL DEFAULT '',
+  source           TEXT NOT NULL DEFAULT 'qr',      -- qr | manual | import
+  recorded_by      TEXT,
+  recorded_by_name TEXT NOT NULL DEFAULT '',
+  valid_until      TEXT,
+  member_kind      TEXT,                            -- sportovni | radne (snapshot)
+  note             TEXT NOT NULL DEFAULT '',
+  created_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entries_created  ON entries (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_member   ON entries (member_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_facility ON entries (facility_code, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_entries_kind     ON entries (kind, created_at DESC);
+
+-- 2) AUDIT ZÁPISU ČLENSTVÍ — kdo, kde, kdy zapsal člena a jaký typ mu dal
+CREATE TABLE IF NOT EXISTS membership_audit (
+  id          TEXT PRIMARY KEY,
+  member_id   TEXT NOT NULL,
+  action      TEXT NOT NULL,      -- created | kind_changed | activated | blocked | unblocked
+  kind_from   TEXT,
+  kind_to     TEXT,
+  status_from TEXT,
+  status_to   TEXT,
+  source      TEXT NOT NULL DEFAULT 'app.tjkrupka.cz',
+  actor_email TEXT NOT NULL DEFAULT '',
+  actor_id    TEXT,
+  actor_name  TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_maudit_member  ON membership_audit (member_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_maudit_created ON membership_audit (created_at DESC);
+
+-- 3) POZVÁNKY PRO ÚČTY DOZORU (vytváří jen superadmin, doručuje e-mailem)
+CREATE TABLE IF NOT EXISTS dozor_invites (
+  id         TEXT PRIMARY KEY,
+  email      TEXT NOT NULL,
+  first_name TEXT NOT NULL DEFAULT '',
+  last_name  TEXT NOT NULL DEFAULT '',
+  phone      TEXT NOT NULL DEFAULT '',
+  token      TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at    TEXT,
+  revoked_at TEXT,
+  invited_by TEXT NOT NULL DEFAULT '',
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dozvinv_email ON dozor_invites (lower(email));
+CREATE INDEX IF NOT EXISTS idx_dozvinv_token ON dozor_invites (token);
+
+-- 6) VÝKONOVÉ INDEXY (QR kontrola, platby, přehled členské základny)
+CREATE INDEX IF NOT EXISTS idx_cards_payload         ON cards (qr_payload);
+CREATE INDEX IF NOT EXISTS idx_payments_member_ok    ON payments (member_id, status, purpose);
+CREATE INDEX IF NOT EXISTS idx_entitlements_m_valid  ON entitlements (member_id, valid_until DESC);
+CREATE INDEX IF NOT EXISTS idx_members_role          ON members (role);
+CREATE INDEX IF NOT EXISTS idx_members_status        ON members (status);
+CREATE INDEX IF NOT EXISTS idx_members_kind          ON members (membership_kind);
+CREATE INDEX IF NOT EXISTS idx_consents_member       ON consents (member_id);

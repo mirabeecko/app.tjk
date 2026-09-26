@@ -32,6 +32,22 @@ function ensureColumn(table, column, ddl) {
 ensureColumn('bookings', 'facility_id', 'facility_id TEXT REFERENCES facilities(id)');
 ensureColumn('events', 'facility_id', 'facility_id TEXT REFERENCES facilities(id)');
 ensureColumn('members', 'guardian_token_expires', 'guardian_token_expires TEXT');
+// ---- rozšíření 2026-09-27: audit typu členství, blokace účtu, ověřená fotka ----
+// Zdroj + kdo/kdy nastavil typ členství (požadavek: u člena vždy typ + kdo/kde/kdy zapsal)
+ensureColumn('members', 'membership_kind_source', "membership_kind_source TEXT DEFAULT 'app.tjkrupka.cz'");
+ensureColumn('members', 'membership_kind_set_by', 'membership_kind_set_by TEXT');
+ensureColumn('members', 'membership_kind_set_at', 'membership_kind_set_at TEXT');
+// Pozastavení/obnovení přístupu do účtu superadminem
+ensureColumn('members', 'blocked', 'blocked INTEGER NOT NULL DEFAULT 0');
+ensureColumn('members', 'blocked_at', 'blocked_at TEXT');
+ensureColumn('members', 'blocked_reason', 'blocked_reason TEXT');
+// Ověřená fotografie (pro kontrolu dozorem) + kdy a kým byl dozor udělen
+ensureColumn('members', 'photo_verified', 'photo_verified INTEGER NOT NULL DEFAULT 0');
+ensureColumn('members', 'photo_verified_at', 'photo_verified_at TEXT');
+ensureColumn('members', 'dozor_granted_at', 'dozor_granted_at TEXT');
+ensureColumn('members', 'dozor_granted_by', 'dozor_granted_by TEXT');
+// Zpětná konzistence pro existující řádky
+db.prepare("UPDATE members SET membership_kind_source = 'app.tjkrupka.cz' WHERE membership_kind_source IS NULL").run();
 
 // Migrace dat: oprava překlepu v účelu plateb „príspevek" → „prispevek"
 // (staré řádky vzniklé před opravou by se jinak nepropojily s novým kódem).
@@ -154,6 +170,9 @@ const DocVersions = {
     const keys = db.prepare('SELECT DISTINCT doc_key FROM doc_versions').all();
     return keys.map((k) => this.latest(k.doc_key));
   },
+  // KONKRÉTNÍ VERZE dokumentu — pro důkazní protokol („tohle znění člen podepsal“).
+  byKeyVersion: (docKey, version) =>
+    db.prepare('SELECT * FROM doc_versions WHERE doc_key = ? AND version = ?').get(docKey, version),
   getById: (id) => db.prepare('SELECT * FROM doc_versions WHERE id = ?').get(id),
 };
 
@@ -161,11 +180,21 @@ const DocVersions = {
 const Consents = {
   create({ memberId, docKey, docVersion, contentHash, signerType, identity, ip, userAgent }) {
     const id = uuid();
+    // Stejná logika jako v db-postgres.js: NOVÁ VERZE dokumentu => souhlas se
+    // upsertuje (UNIQUE(member_id, doc_key, signer_type)), aby opakované odeslání
+    // formuláře nespadlo na SQLITE_CONSTRAINT (500) — drivery musí být shodné.
     db.prepare(
       `INSERT INTO consents (id, member_id, doc_key, doc_version, content_hash, signer_type, identity, granted_at, ip, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (member_id, doc_key, signer_type) DO UPDATE SET
+         doc_version = excluded.doc_version,
+         content_hash = excluded.content_hash,
+         identity = excluded.identity,
+         granted_at = excluded.granted_at,
+         ip = excluded.ip,
+         user_agent = excluded.user_agent`
     ).run(id, memberId, docKey, docVersion, contentHash, signerType, identity, now(), ip, userAgent);
-    return this.getById(id);
+    return this.has(memberId, docKey, signerType);
   },
   getById: (id) => db.prepare('SELECT * FROM consents WHERE id = ?').get(id),
   listForMember: (memberId) =>

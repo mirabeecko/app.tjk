@@ -1058,3 +1058,423 @@ tbody tr:hover { background: var(--bg-2); }
 ::selection { background: var(--pine-500); color: #07100A; }
 .price { color: var(--pine-300); }
 body { background: var(--bg-0); }
+
+/* ══════════════════════════════════════════════════════════════
+   PLATBA / DOKONČENÍ REGISTRACE (v31)
+   Dvě výrazné barvy, používané v celém registračním toku:
+     ZELENÁ   = člen / hotovo        (denní vstup 300 Kč)
+     ORANŽOVÁ = nečlen / zbývá krok  (denní vstup 600 Kč)
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --m-green: #28DF87;
+  --m-green-strong: #0FA061;
+  --m-green-soft: rgba(20, 196, 117, 0.15);
+  --m-green-line: rgba(40, 223, 135, 0.45);
+  --m-green-grad: linear-gradient(135deg, #6BF5B4, #14C475 55%, #0B8B52);
+  --m-green-ink: #04231A;
+
+  --m-amber: #FFAE2B;
+  --m-amber-strong: #FF8A00;
+  --m-amber-soft: rgba(255, 174, 43, 0.15);
+  --m-amber-line: rgba(255, 174, 43, 0.45);
+  --m-amber-grad: linear-gradient(135deg, #FFD98A, #FFAE2B 55%, #E8790A);
+  --m-amber-ink: #2A1500;
+}
+
+/* ---------- hero: stav registrace + vysvětlení výhod členství ---------- */
+.hero-inner .pill.wait { color: var(--m-amber); background: var(--m-amber-soft); border: 1px solid var(--m-amber-line); }
+.hero-inner .pill.wait::before { background: var(--m-amber); animation: dotPulse 1.5s ease-in-out infinite; }
+.hero-inner .pill.ok { color: var(--m-green); background: var(--m-green-soft); border: 1px solid var(--m-green-line); }
+.hero-inner .pill.ok::before { background: var(--m-green); }
+
+.pay-hero .hero-stats { max-width: 720px; }
+.pay-hero .hero-stat { transition: transform var(--dur-fast) var(--ease-out); }
+.pay-hero .hero-stat.member { background: var(--m-green-soft); border-color: var(--m-green-line); }
+.pay-hero .hero-stat.guest { background: var(--m-amber-soft); border-color: var(--m-amber-line); }
+.pay-hero .hero-stat.member .hs-value { color: var(--m-green); }
+.pay-hero .hero-stat.guest .hs-value { color: var(--m-amber); }
+
+.hero-claim {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 14px;
+  max-width: 720px; padding: 11px 14px; border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.88); font-size: 0.86rem; line-height: 1.5; font-weight: 500;
+}
+.hero-claim svg { width: 16px; height: 16px; flex: none; margin-top: 2px; stroke: var(--m-green); fill: none; stroke-width: 2.2; }
+
+/* ---------- progress + kroky registrace ---------- */
+.reg-progress { display: flex; align-items: center; gap: 12px; margin: 20px 0 4px; }
+.reg-progress .track { flex: 1; height: 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.13); overflow: hidden; }
+.reg-progress .fill { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--m-green), var(--m-amber)); transition: width var(--dur-slow) var(--ease-out); }
+.reg-progress .reg-progress-label { font-size: 0.68rem; font-weight: 850; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.72); white-space: nowrap; }
+
+.reg-steps { margin-top: 12px; }
+.reg-steps .step { color: rgba(255, 255, 255, 0.5); }
+.reg-steps .step .dot {
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.07); border: 1.5px solid rgba(255, 255, 255, 0.22);
+  color: rgba(255, 255, 255, 0.7); font-size: 0.8rem; font-weight: 800;
+}
+.reg-steps .step .dot svg { width: 15px; height: 15px; stroke-width: 3.2; }
+.reg-steps .step:not(:last-child)::after { background: rgba(255, 255, 255, 0.16); }
+.reg-steps .step.done { color: var(--m-green); }
+.reg-steps .step.done .dot { background: var(--m-green-grad); border-color: transparent; color: var(--m-green-ink); }
+.reg-steps .step.done:not(:last-child)::after { background: var(--m-green-strong); }
+.reg-steps .step.active { color: var(--m-amber); font-weight: 850; }
+.reg-steps .step.active .dot {
+  background: var(--m-amber-grad); border-color: transparent; color: var(--m-amber-ink);
+  box-shadow: 0 0 0 4px rgba(255, 174, 43, 0.16), 0 8px 18px -8px rgba(255, 174, 43, 0.6);
+  animation: stepPulse 2.2s ease-in-out infinite;
+}
+.reg-steps .step.todo .dot { background: transparent; border-style: dashed; color: rgba(255, 255, 255, 0.45); }
+@keyframes stepPulse { 0%, 100% { transform: scale(1.04); } 50% { transform: scale(1.1); } }
+
+/* ---------- varianty: členství × jednorázový vstup ---------- */
+.variant-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0 0; align-items: stretch; }
+@media (max-width: 760px) { .variant-grid { grid-template-columns: 1fr; } }
+
+.variant-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 22px 18px 18px; border-radius: var(--radius-lg);
+  background: var(--bg-1); border: 1.5px solid var(--border);
+  cursor: pointer; text-align: left;
+  transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast), box-shadow var(--dur-med);
+}
+.variant-card::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px; opacity: 0.5; transition: opacity var(--dur-fast); }
+.variant-card.member::before { background: var(--m-green-grad); }
+.variant-card.guest::before { background: var(--m-amber-grad); }
+.variant-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.variant-card:hover::before { opacity: 0.85; }
+.variant-card:focus-visible { outline: 3px solid var(--primary); outline-offset: 3px; }
+.variant-card.selected { border-color: var(--m-green-line); box-shadow: 0 0 0 3px var(--m-green-soft), var(--shadow-md); }
+.variant-card.selected.guest { border-color: var(--m-amber-line); box-shadow: 0 0 0 3px var(--m-amber-soft), var(--shadow-md); }
+.variant-card.selected::before { opacity: 1; }
+.variant-card.locked { cursor: default; }
+.variant-card.locked:hover { transform: none; box-shadow: none; }
+
+.variant-head { display: flex; align-items: flex-start; gap: 12px; }
+.variant-ico { width: 46px; height: 46px; flex: none; border-radius: 14px; display: grid; place-items: center; }
+.variant-ico svg { width: 22px; height: 22px; stroke-width: 2.2; }
+.variant-ico.member { background: var(--m-green-grad); color: var(--m-green-ink); }
+.variant-ico.guest { background: var(--m-amber-grad); color: var(--m-amber-ink); }
+.variant-title { display: block; font-family: var(--font-display); font-weight: 750; font-size: 1.08rem; letter-spacing: -0.01em; color: var(--text-0); }
+.variant-sub { display: block; font-size: 0.78rem; color: var(--text-2); line-height: 1.35; }
+.variant-radio {
+  margin-left: auto; width: 26px; height: 26px; flex: none; border-radius: 50%;
+  border: 2px solid var(--border-strong); display: grid; place-items: center; color: transparent;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+.variant-radio svg { stroke-width: 3.4; fill: none; stroke: currentColor; }
+.variant-card.selected.member .variant-radio { background: var(--m-green); border-color: var(--m-green); color: var(--m-green-ink); }
+.variant-card.selected.guest .variant-radio { background: var(--m-amber); border-color: var(--m-amber); color: var(--m-amber-ink); }
+
+.variant-badge {
+  align-self: flex-start; font-size: 0.62rem; font-weight: 850; letter-spacing: 0.1em;
+  text-transform: uppercase; border-radius: var(--radius-pill); padding: 4px 11px; border: 1px solid transparent;
+}
+.variant-badge.member { background: var(--m-green-soft); color: var(--m-green); border-color: var(--m-green-line); }
+.variant-badge.guest { background: var(--m-amber-soft); color: var(--m-amber); border-color: var(--m-amber-line); }
+
+.variant-price {
+  font-family: var(--font-display); font-size: 2.05rem; font-weight: 800;
+  letter-spacing: -0.03em; line-height: 1; color: var(--text-0); font-variant-numeric: tabular-nums;
+}
+.variant-price small { font-size: 0.78rem; font-weight: 700; color: var(--text-2); letter-spacing: 0; }
+.variant-card.member .variant-price { color: var(--m-green); }
+.variant-card.guest .variant-price { color: var(--m-amber); }
+
+.variant-perks { list-style: none; display: flex; flex-direction: column; gap: 9px; margin: 0; }
+.variant-perks li { display: flex; align-items: flex-start; gap: 9px; font-size: 0.86rem; color: var(--text-1); line-height: 1.42; }
+.variant-perks .pv-ico { width: 20px; height: 20px; flex: none; border-radius: 7px; display: grid; place-items: center; margin-top: 1px; }
+.variant-perks .pv-ico svg { width: 13px; height: 13px; stroke-width: 3.2; fill: none; }
+.variant-card.member .pv-ico { background: var(--m-green-soft); color: var(--m-green); }
+.variant-card.guest .pv-ico { background: var(--m-amber-soft); color: var(--m-amber); }
+
+.variant-foot { margin-top: auto; padding-top: 10px; font-size: 0.76rem; color: var(--text-2); line-height: 1.45; }
+
+/* ---------- potvrzení volby ---------- */
+.pay-cta {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 16px;
+  padding: 16px 18px; border-radius: var(--radius-lg);
+  background: var(--bg-1); border: 1.5px dashed var(--border-strong);
+  transition: border-color var(--dur-med), box-shadow var(--dur-med), background var(--dur-med);
+}
+.pay-cta.armed { border-style: solid; }
+.pay-cta.armed.member { border-color: var(--m-green-line); box-shadow: 0 0 0 3px var(--m-green-soft); }
+.pay-cta.armed.guest { border-color: var(--m-amber-line); box-shadow: 0 0 0 3px var(--m-amber-soft); }
+.pay-cta-info { flex: 1; min-width: 210px; display: flex; flex-direction: column; gap: 1px; }
+.pay-cta-info .pci-label { font-size: 0.6rem; font-weight: 850; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-2); }
+.pay-cta-info .pci-value { font-family: var(--font-display); font-weight: 750; font-size: 1.06rem; color: var(--text-0); }
+.pay-cta-info .pci-note { font-size: 0.77rem; color: var(--text-2); }
+.pay-cta .btn { width: auto; min-width: 250px; margin-top: 0; }
+@media (max-width: 620px) { .pay-cta .btn { width: 100%; min-width: 0; } }
+
+.btn.member { background: var(--m-green-grad); color: var(--m-green-ink); box-shadow: 0 10px 26px -12px rgba(20, 196, 117, 0.7); }
+.btn.member:hover { color: var(--m-green-ink); filter: brightness(1.07); }
+.btn.guest { background: var(--m-amber-grad); color: var(--m-amber-ink); box-shadow: 0 10px 26px -12px rgba(255, 138, 0, 0.7); }
+.btn.guest:hover { color: var(--m-amber-ink); filter: brightness(1.07); }
+
+/* ---------- blokátor (chybějící souhlasy) ---------- */
+.card.pay-locked { display: flex; gap: 14px; align-items: flex-start; border-left: 4px solid var(--m-amber); }
+.pay-locked .lock-ico {
+  width: 44px; height: 44px; flex: none; border-radius: 13px; display: grid; place-items: center;
+  background: var(--m-amber-soft); color: var(--m-amber); border: 1px solid var(--m-amber-line);
+}
+.pay-locked h3 { margin-top: 0; }
+.missing-docs { list-style: none; margin: 6px 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.missing-docs li { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; color: var(--text-1); }
+.missing-docs li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--m-amber); flex: none; }
+
+/* ---------- jediná poznámka o platební bráně (konec stránky) ---------- */
+.pay-note {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 14px;
+  padding: 12px 2px 0; border-top: 1px solid var(--border);
+  font-size: 0.79rem; color: var(--text-2); line-height: 1.5;
+}
+.pay-note svg { width: 17px; height: 17px; flex: none; margin-top: 2px; stroke: currentColor; fill: none; stroke-width: 2; opacity: 0.8; }
+
+/* ---------- /platba: doladění čitelnosti (v31a) ---------- */
+/* glow v hero je delší než na landingu → nesmí krájet obsah (žádná viditelná hrana) */
+.pay-hero::after { animation: none; opacity: 0.17; filter: blur(30px); right: -150px; bottom: -170px; width: 520px; height: 520px; }
+/* třetí cenový chip (členství) musí být stejně viditelný jako zelený a oranžový */
+.pay-hero .hero-stat:nth-child(3) { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.24); }
+/* budoucí krok registrace: obrys má být čitelný, ne neviditelný */
+.reg-steps .step.todo { color: rgba(255, 255, 255, 0.62); }
+.reg-steps .step.todo .dot { border-color: rgba(255, 255, 255, 0.38); color: rgba(255, 255, 255, 0.68); }
+/* poznámky u variant: na tmavém pozadí musí zůstat čitelné */
+.variant-foot { color: #A9B6CC; font-size: 0.78rem; }
+/* neaktivní tlačítko v potvrzovací liště = jasně „ještě nelze kliknout“ */
+.pay-cta .btn:disabled {
+  background: var(--bg-2); color: var(--text-2); opacity: 1;
+  border: 1.5px dashed var(--border-strong); box-shadow: none; cursor: not-allowed;
+}
+.pay-cta .btn:disabled:hover { filter: none; }
+
+/* ===========================================================================
+   DOZOR + SPRÁVA ZÁKLADNY (2026-09-27)
+   Účet dozoru má ODLIŠNÉ barvy, aby se na první pohled poznal od členského.
+   =========================================================================== */
+
+/* ---- téma podle role: účet dozoru = tmavě modrozelená, vlastník = fialová ---- */
+body.role-dozor {
+  --primary: #0E8D66;
+  --primary-hover: #0B6E50;
+  --primary-soft: rgba(14, 141, 102, 0.12);
+  --primary-glow: rgba(14, 141, 102, 0.35);
+  --accent: #0E8D66;
+  --accent-soft: rgba(14, 141, 102, 0.12);
+  --accent-deep: #0B6E50;
+  background:
+    radial-gradient(1100px 480px at 12% -8%, rgba(14, 141, 102, 0.16), transparent 62%),
+    radial-gradient(900px 420px at 92% 4%, rgba(46, 150, 201, 0.12), transparent 60%),
+    var(--bg-0);
+}
+body.role-dozor .topbar { border-bottom: 2px solid rgba(14, 141, 102, 0.35); }
+body.role-vybor { --primary: #7757D6; --primary-hover: #5F41BC; --primary-soft: rgba(119, 87, 214, 0.12); }
+body.role-superadmin { --primary: #7757D6; --primary-hover: #5F41BC; --primary-soft: rgba(119, 87, 214, 0.12); }
+
+/* ---- odznak role ---- */
+.role-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: var(--radius-pill);
+  font-family: var(--font-display); font-size: 0.72rem; font-weight: 800;
+  letter-spacing: 0.08em; text-transform: uppercase; vertical-align: middle;
+  border: 1px solid transparent;
+}
+.role-badge.dozor { background: rgba(14, 141, 102, 0.14); color: #0B6E50; border-color: rgba(14, 141, 102, 0.35); }
+.role-badge.vybor { background: rgba(119, 87, 214, 0.14); color: #5F41BC; border-color: rgba(119, 87, 214, 0.32); }
+.role-badge.owner { background: rgba(217, 72, 84, 0.12); color: var(--red-700); border-color: rgba(217, 72, 84, 0.3); }
+
+/* ---- zvýrazněné položky menu ---- */
+.mm-item.hl-dozor {
+  background: linear-gradient(90deg, rgba(14, 141, 102, 0.16), rgba(14, 141, 102, 0.04));
+  border-left: 3px solid var(--green-600); font-weight: 700;
+}
+.mm-item.hl-dozor .mm-icon { color: var(--green-600); }
+.mm-item.hl-owner {
+  background: linear-gradient(90deg, rgba(119, 87, 214, 0.16), rgba(119, 87, 214, 0.04));
+  border-left: 3px solid var(--violet-600); font-weight: 700;
+}
+.mm-item.hl-owner .mm-icon { color: var(--violet-600); }
+.dozor-nav.active { background: var(--green-600); color: #fff; border-radius: var(--radius-sm); }
+
+/* ---- panel (karta sekce) ---- */
+.panel {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  padding: 18px 18px 16px; margin: 16px 0;
+}
+.panel-title {
+  display: flex; align-items: center; gap: 9px;
+  font-family: var(--font-display); font-size: 1.02rem; font-weight: 700;
+  margin: 0 0 12px; color: var(--text-0);
+}
+.panel-title svg { color: var(--primary); flex: none; }
+
+/* ---- hlavička dozora + vstupní panel ---- */
+.dozor-head { margin: 8px 0 4px; }
+.dozor-head h1 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dozor-panel {
+  background: linear-gradient(180deg, var(--bg-1), rgba(14, 141, 102, 0.04));
+  border-color: rgba(14, 141, 102, 0.25);
+}
+.dozor-form { display: flex; gap: 10px; flex-wrap: wrap; }
+.dozor-form input { flex: 1 1 260px; }
+.manual-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.manual-form input, .manual-form select { flex: 1 1 170px; }
+.dozor-hint { margin-top: 10px; font-size: 0.86rem; color: var(--text-2); }
+.dozor-cam { margin-top: 12px; }
+.cam-video { width: 100%; max-width: 460px; border-radius: var(--radius-md); background: #000; }
+
+/* ---- velká karta výsledku kontroly ---- */
+.dozor-result { margin-top: 4px; }
+.dozor-card {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-md); overflow: hidden;
+}
+.dozor-card .dc-head {
+  display: flex; flex-direction: column; gap: 14px; padding: 20px 20px 18px;
+  color: #fff;
+}
+.dozor-card.allowed .dc-head { background: linear-gradient(135deg, #0E8D66, #18AC81); }
+.dozor-card.denied  .dc-head { background: linear-gradient(135deg, #B42F3C, #D94854); }
+.dozor-card.blocked .dc-head { background: linear-gradient(135deg, #4B5563, #6B7280); }
+.dozor-card .dc-head svg { flex: none; }
+.dozor-card .dc-head > div:first-child { display: flex; align-items: center; gap: 14px; }
+.dc-title { font-family: var(--font-display); font-size: 1.5rem; font-weight: 800; letter-spacing: 0.01em; line-height: 1.15; }
+.dc-sub { font-size: 0.95rem; opacity: 0.95; margin-top: 3px; }
+
+/* ---- identita + fotka ---- */
+.dc-ident { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.dc-photo { position: relative; flex: none; }
+.dc-photo img {
+  width: 108px; height: 134px; object-fit: cover;
+  border-radius: var(--radius-md); border: 2px solid rgba(255, 255, 255, 0.65);
+  background: rgba(0, 0, 0, 0.15);
+}
+.dc-photo .photo-ok, .dc-photo .photo-warn {
+  position: absolute; left: 0; bottom: -8px; font-size: 0.68rem; font-weight: 700;
+  padding: 2px 8px; border-radius: var(--radius-pill); white-space: nowrap;
+}
+.dc-photo .photo-ok { background: #fff; color: var(--green-700); }
+.dc-photo .photo-warn { background: rgba(255, 255, 255, 0.85); color: var(--red-700); }
+.photo-none {
+  width: 108px; height: 134px; border-radius: var(--radius-md);
+  border: 2px dashed rgba(255, 255, 255, 0.5); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px; font-size: 0.7rem; opacity: 0.9;
+}
+.dc-fields { flex: 1 1 260px; display: grid; gap: 7px; }
+.dc-field { display: flex; gap: 10px; font-size: 0.94rem; }
+.dc-field .dc-k { min-width: 118px; opacity: 0.82; }
+.dc-field .dc-v { font-weight: 600; }
+
+/* ---- sekce uvnitř karty ---- */
+.dc-section { padding: 18px 20px; border-top: 1px solid var(--border); }
+.dc-section h3 {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-family: var(--font-display); font-size: 0.98rem; font-weight: 700;
+  margin: 0 0 12px; color: var(--text-0);
+}
+.dc-section h3 svg { color: var(--primary); flex: none; }
+.dc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.field-box {
+  background: var(--bg-2); border: 1px solid transparent;
+  border-radius: var(--radius-md); padding: 9px 12px; display: flex; flex-direction: column; gap: 2px;
+}
+.field-box .fb-k { font-size: 0.74rem; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.field-box .fb-v { font-family: var(--font-display); font-size: 1.02rem; font-weight: 700; color: var(--text-0); }
+.field-box.ok { background: rgba(24, 172, 129, 0.13); border-color: rgba(24, 172, 129, 0.3); }
+.field-box.ok .fb-v { color: var(--green-700); }
+.field-box.warn { background: rgba(46, 124, 232, 0.12); border-color: rgba(46, 124, 232, 0.28); }
+.field-box.bad { background: rgba(217, 72, 84, 0.12); border-color: rgba(217, 72, 84, 0.3); }
+.field-box.bad .fb-v { color: var(--red-700); }
+
+/* ---- poznámky ---- */
+.dc-note {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 12px;
+  font-size: 0.86rem; color: var(--text-1);
+}
+.dc-note svg { flex: none; color: var(--text-2); margin-top: 2px; }
+.dc-note.ok { color: var(--green-700); }
+.dc-note.ok svg { color: var(--green-600); }
+.dc-note.warn { color: var(--red-700); }
+.dc-note.warn svg { color: var(--red-600); }
+
+/* ---- seznamy dokumentů a vstupů ---- */
+.doc-list, .entry-list { display: flex; flex-direction: column; gap: 6px; }
+.doc-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  background: var(--bg-2); border-radius: var(--radius-md);
+}
+.doc-row svg { flex: none; color: var(--green-600); }
+.doc-main { flex: 1 1 auto; min-width: 0; }
+.doc-title { font-weight: 600; font-size: 0.92rem; color: var(--text-0); }
+.doc-meta { font-size: 0.78rem; color: var(--text-2); margin-top: 2px; }
+.doc-state { font-size: 0.74rem; font-weight: 700; padding: 2px 9px; border-radius: var(--radius-pill); flex: none; }
+.doc-state.ok { background: rgba(24, 172, 129, 0.16); color: var(--green-700); }
+.doc-state.warn { background: rgba(217, 72, 84, 0.14); color: var(--red-700); }
+
+.entry-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-radius: var(--radius-md); background: var(--bg-2); font-size: 0.88rem;
+}
+.entry-row.ok { border-left: 3px solid var(--green-600); }
+.entry-row.no { border-left: 3px solid var(--red-600); background: rgba(217, 72, 84, 0.07); }
+.entry-row svg { flex: none; }
+.entry-row.ok svg { color: var(--green-600); }
+.entry-row.no svg { color: var(--red-600); }
+.entry-when { flex: none; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-1); min-width: 132px; }
+.entry-rel, .entry-who, .entry-kind { font-size: 0.78rem; color: var(--text-2); }
+.entry-name { flex: 1 1 auto; font-weight: 600; color: var(--text-0); }
+
+/* ---- statistiky ---- */
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; }
+.stat-tile {
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 13px 14px; box-shadow: var(--shadow-xs);
+}
+.st-top { display: flex; align-items: center; gap: 7px; }
+.st-ico { color: var(--primary); display: inline-flex; }
+.st-label { font-size: 0.78rem; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; }
+.st-value {
+  font-family: var(--font-display); font-size: 1.65rem; font-weight: 800;
+  color: var(--text-0); margin: 6px 0 2px; line-height: 1.1;
+}
+.st-sub { font-size: 0.78rem; color: var(--text-2); }
+
+/* ---- tabulky ---- */
+.table-wrap { overflow-x: auto; margin-top: 8px; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.table th {
+  text-align: left; padding: 9px 10px; font-size: 0.74rem; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-2); border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+.table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.table tbody tr:hover { background: var(--bg-2); }
+.table .actions { white-space: nowrap; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---- drobné prvky ---- */
+.btn.tiny { padding: 5px 11px; font-size: 0.78rem; border-radius: var(--radius-xs); width: auto; margin: 0; }
+.chip, .count-chip {
+  display: inline-flex; align-items: center; font-size: 0.72rem; font-weight: 700;
+  padding: 2px 9px; border-radius: var(--radius-pill); background: var(--bg-3); color: var(--text-1);
+}
+.chip.ok, .count-chip.ok { background: rgba(24, 172, 129, 0.16); color: var(--green-700); }
+.chip.muted, .count-chip.muted { background: var(--bg-3); color: var(--text-2); }
+.count-chip.warn { background: rgba(217, 72, 84, 0.14); color: var(--red-700); }
+.copy-row { display: flex; gap: 8px; margin-top: 8px; }
+.copy-row input { flex: 1 1 auto; font-family: var(--font-mono); font-size: 0.8rem; }
+.loading-row { display: flex; align-items: center; gap: 10px; padding: 18px 4px; color: var(--text-1); }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.stack .btn { width: auto; align-self: flex-start; }
+
+@media (max-width: 620px) {
+  .dc-fields { flex-basis: 100%; }
+  .dc-field { flex-direction: column; gap: 1px; }
+  .dc-field .dc-k { min-width: 0; font-size: 0.76rem; text-transform: uppercase; }
+  .dc-title { font-size: 1.22rem; }
+  .entry-when { min-width: 0; }
+  .entry-rel { display: none; }
+}

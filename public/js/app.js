@@ -1,6 +1,27 @@
 // app.js — hash router + navigace + start aplikace.
 'use strict';
 
+/* -------------------------------------------------------------------------
+ * LENIVÉ NAČÍTÁNÍ SKRIPTŮ (výkon)
+ * Administrátorský a dozorový kód potřebuje jen zlomek uživatelů. Načítáme ho
+ * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
+ * tak nestahuje ~50 kB JS, který nikdy nepoužije.
+ * ----------------------------------------------------------------------- */
+const SKRIPT_ADMIN = '/js/views-admin.js?v=37';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=37';
+const _nactene = {};
+function nactiSkript(src) {
+  if (_nactene[src]) return _nactene[src];
+  _nactene[src] = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Skript se nepodařilo načíst: ' + src));
+    document.body.append(s);
+  });
+  return _nactene[src];
+}
+
 const routes = [
   { pattern: /^#\/?$/, view: viewLanding, name: 'Úvod', icon: 'home' },
   { pattern: /^#\/registrace$/, view: viewRegister, name: 'Registrace', icon: 'edit' },
@@ -17,14 +38,26 @@ const routes = [
   { pattern: /^#\/pravidla$/, view: viewRules, name: 'Pravidla provozu', icon: 'shield' },
   { pattern: /^#\/profil$/, view: viewProfile, name: 'Profil', icon: 'user' },
   { pattern: /^#\/notifikace$/, view: viewNotifications, name: 'Notifikace', icon: 'bell' },
-  { pattern: /^#\/admin$/, view: viewAdmin, name: 'Správa', icon: 'dashboard' },
-  { pattern: /^#\/admin\/(.+)$/, view: (m) => viewAdminDetail(m[1]) },
-  { pattern: /^#\/superadmin$/, view: viewSuperAdmin, name: 'Vlastník', icon: 'shield' },
-  { pattern: /^#\/katalog-admin$/, view: viewAdminCatalog, name: 'Katalog (admin)', icon: 'bag' },
-  { pattern: /^#\/outbox$/, view: viewOutbox, name: 'E-maily', icon: 'mail' },
+  // ---- SPRÁVA (kód se dotahuje lenivě) ----
+  { pattern: /^#\/admin$/, view: () => viewAdmin(), lazy: SKRIPT_ADMIN, name: 'Správa', icon: 'dashboard' },
+  { pattern: /^#\/admin\/(.+)$/, view: (m) => viewAdminDetail(m[1]), lazy: SKRIPT_ADMIN },
+  { pattern: /^#\/superadmin$/, view: () => viewSuperAdmin(), lazy: SKRIPT_ADMIN, name: 'Vlastník', icon: 'shield' },
+  { pattern: /^#\/katalog-admin$/, view: () => viewAdminCatalog(), lazy: SKRIPT_ADMIN, name: 'Katalog (admin)', icon: 'bag' },
+  { pattern: /^#\/outbox$/, view: () => viewOutbox(), name: 'E-maily', icon: 'mail' },
+  // ---- DOZOR (role dozor / výbor / superadmin) ----
+  { pattern: /^#\/dozor$/, view: () => viewDozor(), lazy: SKRIPT_DOZOR, name: 'Dozor', icon: 'qr', dozor: true },
+  { pattern: /^#\/dozor-pozvanka\/(.+)$/, view: (m) => viewDozorPozvanka(m[1]), lazy: SKRIPT_DOZOR },
+  // ---- VLASTNÍK: přehled základny + správa dozoru (pouze miroslavbrozek@gmail.com) ----
+  { pattern: /^#\/zakladna$/, view: () => viewSuperAdminZakladna(), lazy: SKRIPT_DOZOR, name: 'Členská základna', icon: 'users', owner: true },
+  { pattern: /^#\/superadmin-dozor$/, view: () => viewSuperAdminDozor(), lazy: SKRIPT_DOZOR, name: 'Správa dozoru', icon: 'qr', owner: true },
   { pattern: /^#\/podminky$/, view: viewDocs, name: 'Podmínky', icon: 'file' },
-  { pattern: /^#\/rezervace$/, view: viewBookings, name: 'Rezervace', icon: 'clock' },
-  { pattern: /^#\/merch$/, view: viewMerch, name: 'Merch', icon: 'bag' },
+  // POZOR: viewBookings žije ve views-admin.js — MUSÍ být obalené v lazy šipce,
+  // jinak by se na něj router odkazoval v okamžiku sestavení a spadl by celý
+  // start aplikace (ReferenceError). Rezervace proto dotahuje admin skript.
+  { pattern: /^#\/rezervace$/, view: () => viewBookings(), lazy: SKRIPT_ADMIN, name: 'Rezervace', icon: 'clock' },
+  // Merch je momentálně SKRYTÝ — žádný merch ještě neexistuje, takže se
+  // v aplikaci nesmí zobrazovat žádné produkty. Route se vrací jedním řádkem:
+  // { pattern: /^#\/merch$/, view: viewMerch, name: 'Merch', icon: 'bag' },
 ];
 
 async function render() {
@@ -37,6 +70,8 @@ async function render() {
 
   const match = hash.match(route.pattern);
   try {
+    // kód správy/dozoru se dotáhne, až když je potřeba
+    if (route.lazy) await nactiSkript(route.lazy);
     await route.view(match);
   } catch (err) {
     console.error('CHYBA POHLEDU:', err);
@@ -72,6 +107,8 @@ function renderNav() {
   topnav.innerHTML = '';
   bottomnav.innerHTML = '';
   if (mobileMenu) mobileMenu.innerHTML = '';
+  // Vzhled podle role: účet dozoru má odlišné barvy (na první pohled poznat)
+  applyRoleTheme();
 
   const isActive = (href) => hash.startsWith(href) && href !== '#/';
 
@@ -82,13 +119,22 @@ function renderNav() {
   ];
 
   // sekundární položky (do „více" menu / sekcí)
-  const moreItems = [
+  const moreItems = [];
+  // ZVÝRAZNĚNÁ položka pro účet s právy dozoru — musí být na první pohled vidět
+  if (isLoggedIn() && isDozor()) {
+    moreItems.push({ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' });
+  }
+  moreItems.push(
     { href: '#/karta', label: 'Členská karta', icon: 'ticket' },
-    { href: '#/merch', label: 'Merch', icon: 'bag' },
     { href: '#/pravidla', label: 'Pravidla provozu', icon: 'shield' },
     { href: '#/podminky', label: 'Provozní řád', icon: 'file' },
-  ];
+  );
   if (isLoggedIn() && isStaff()) moreItems.push({ href: '#/admin', label: 'Správa', icon: 'dashboard' });
+  // Vlastník: okamžitý přehled členské základny + správa účtů dozoru
+  if (isLoggedIn() && isSuperAdmin()) {
+    moreItems.push({ href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' });
+    moreItems.push({ href: '#/superadmin-dozor', label: 'Správa dozoru', icon: 'qr', highlight: 'owner' });
+  }
   if (isLoggedIn() && isSuperAdmin()) moreItems.push({ href: '#/superadmin', label: 'Vlastník', icon: 'shield' });
   if (isLoggedIn() && isSuperAdmin()) moreItems.push({ href: '#/katalog-admin', label: 'Katalog (admin)', icon: 'bag' });
   // Notifikace (schválení/neschválení členství) — badge s počtem nepřečtených
@@ -110,13 +156,16 @@ function renderNav() {
   // mobilní / „více" menu (sekce)
   if (mobileMenu) {
     const sections = [
-      { title: 'Hlavní', items: mainItems.concat([{ href: '#/karta', label: 'Členská karta', icon: 'ticket' }, { href: '#/merch', label: 'Merch', icon: 'bag' }]) },
+      { title: 'Hlavní', items: mainItems.concat([{ href: '#/karta', label: 'Členská karta', icon: 'ticket' }]) },
       { title: 'Informace', items: [{ href: '#/pravidla', label: 'Pravidla provozu', icon: 'shield' }, { href: '#/podminky', label: 'Provozní řád', icon: 'file' }] },
       {
         title: 'Účet',
         items: isLoggedIn()
           ? [{ href: '#/profil', label: `Můj profil — ${me.member.firstName}`, icon: 'user' }]
+              .concat(isDozor() ? [{ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' }] : [])
               .concat(isStaff() ? [{ href: '#/admin', label: 'Správa', icon: 'dashboard' }] : [])
+              .concat(isSuperAdmin() ? [{ href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' }] : [])
+              .concat(isSuperAdmin() ? [{ href: '#/superadmin-dozor', label: 'Správa dozoru', icon: 'qr', highlight: 'owner' }] : [])
               .concat(isSuperAdmin() ? [{ href: '#/superadmin', label: 'Vlastník', icon: 'shield' }] : [])
               .concat([{ href: '#/notifikace', label: 'Notifikace', icon: 'bell' }])
               .concat([{ href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' }])
@@ -127,7 +176,10 @@ function renderNav() {
       const h = el('div', { class: 'mm-section', text: sec.title });
       mobileMenu.append(h);
       for (const it of sec.items) {
-        const a = el('a', { href: it.href, class: 'mm-item' + (isActive(it.href) ? ' active' : '') }, [
+        const a = el('a', {
+          href: it.href,
+          class: 'mm-item' + (isActive(it.href) ? ' active' : '') + (it.highlight ? ` hl-${it.highlight}` : ''),
+        }, [
           el('span', { class: 'mm-icon' }, [ico(it.icon, 18)]),
           el('span', { text: it.label }),
           it.href === '#/notifikace' ? el('span', { class: 'notif-badge', style: 'display:none' }) : null,
@@ -148,6 +200,10 @@ function renderNav() {
       : { href: '#/prihlaseni', label: 'Přihlásit', icon: 'key' },
   ];
   if (isLoggedIn() && isStaff()) mobileItems.splice(4, 0, { href: '#/admin', label: 'Správa', icon: 'dashboard' });
+  if (isLoggedIn() && isDozor()) bottomnav.append(el('a', { href: '#/dozor', class: 'dozor-nav' + (isActive('#/dozor') ? ' active' : '') }, [
+    el('span', { class: 'ico' }, [ico('qr')]),
+    el('span', { text: 'Dozor' }),
+  ]));
   if (isLoggedIn() && isSuperAdmin()) mobileItems.splice(4, 0, { href: '#/superadmin', label: 'Vlastník', icon: 'shield' });
 
   for (const it of mobileItems) {

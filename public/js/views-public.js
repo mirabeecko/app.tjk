@@ -114,7 +114,8 @@ async function viewLanding() {
 
   const welcome = el('section', { class: 'hero hero-member' }, [
     el('span', { class: 'pill', text: 'Členská aplikace' }),
-    el('h1', { text: `Vítej, ${m.firstName}` }),
+    // Oslovení 5. pádem — „Vítej, Petře“ (ne „Vítej, Petr“). Viz public/js/czech.js.
+    el('h1', { text: (typeof CZ !== 'undefined' ? CZ.greet(m.firstName) : `Vítej, ${m.firstName}`) }),
     el('p', { class: 'muted', text: statusLine }),
     el('div', { class: 'hero-status' }, [
       el('span', { class: 'tag ' + (isMember ? 'ok' : 'warn'), text: isMember ? 'ČLEN' : 'NEČLEN' }),
@@ -136,13 +137,6 @@ async function viewLanding() {
       el('span', { class: 'tile-body' }, [
         el('span', { class: 'tile-title', text: 'Rezervace' }),
         el('span', { class: 'tile-sub', text: 'Rezervujte si čas' }),
-      ]),
-    ]),
-    el('a', { class: 'tile', href: '#/merch' }, [
-      el('span', { class: 'tile-icon orange' }, [ico('bag')]),
-      el('span', { class: 'tile-body' }, [
-        el('span', { class: 'tile-title', text: 'Merch' }),
-        el('span', { class: 'tile-sub', text: 'Oblečení a doplňky' }),
       ]),
     ]),
   ]);
@@ -678,14 +672,17 @@ async function viewGuardian(token) {
 async function viewOutbox() {
   const root = $('#view');
   root.innerHTML = '';
-  root.append(el('h1', { text: 'Dev inbox — odeslané zprávy (STUB)' }), el('p', { class: 'muted', text: 'Testovací režim: e-maily ani SMS se reálně neodesílají. Zde vidíte, co by člen/rodič dostal.' }));
   let messages = [];
   try {
     messages = (await API.get('/outbox')).messages;
   } catch (e) {
-    root.append(el('div', { class: 'alert err', text: e.message }));
+    // V produkci je reálné SMTP (Resend) → outbox je záměrně zavřený (403),
+    // aby neunikal obsah e-mailů s přihlašovacími odkazy.
+    root.append(el('h1', { text: 'Odeslané zprávy' }), el('p', { class: 'muted', text: 'Archiv odeslaných e-mailů a SMS.' }));
+    root.append(el('div', { class: 'alert warn', text: e.message }));
     return;
   }
+  root.append(el('h1', { text: 'Dev inbox — odeslané zprávy (STUB)' }), el('p', { class: 'muted', text: 'Testovací režim: e-maily ani SMS se reálně neodesílají. Zde vidíte, co by člen/rodič dostal.' }));
   if (!messages.length) {
     root.append(el('div', { class: 'empty', text: 'Zatím žádné zprávy.' }));
     return;

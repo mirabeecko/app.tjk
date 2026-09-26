@@ -26,8 +26,17 @@ async function loadSession(req, res, next) {
     if (token) {
       const s = await D.Sessions.get(token);
       if (s) {
-        req.session = s;
-        req.member = await D.Members.getById(s.member_id);
+        const member = await D.Members.getById(s.member_id);
+        // POZASTAVENÝ ÚČET (block) — superadmin může kdykoliv zrušit přístup.
+        // Kontrola je tady, aby platila pro VŠECHNY endpointy okamžitě a bez
+        // toho, abychom na ni museli pamatovat v každé routě zvlášť.
+        if (member && Number(member.blocked) === 1) {
+          await D.Sessions.delete(token);
+          req.blocked = true;
+        } else {
+          req.session = s;
+          req.member = member;
+        }
       }
     }
   } catch (err) {
@@ -54,6 +63,9 @@ function clearSessionCookie(res) {
 
 // Guard: vyžaduje přihlášeného člena
 function requireMember(req, res, next) {
+  if (req.blocked) {
+    return res.status(403).json({ error: 'UCET_POZASTAVEN', message: 'Přístup do tohoto účtu byl pozastaven vlastníkem aplikace.' });
+  }
   if (!req.member) return res.status(401).json({ error: 'NEJSTE_PRIHLASENI', message: 'Pro tuto akci je nutné přihlášení.' });
   next();
 }
@@ -61,6 +73,9 @@ function requireMember(req, res, next) {
 // Guard: role member | dozor | vybor | superadmin (dozor a výbor mají i členská práva)
 function requireRole(...roles) {
   return (req, res, next) => {
+    if (req.blocked) {
+      return res.status(403).json({ error: 'UCET_POZASTAVEN', message: 'Přístup do tohoto účtu byl pozastaven vlastníkem aplikace.' });
+    }
     if (!req.member) return res.status(401).json({ error: 'NEJSTE_PRIHLASENI', message: 'Pro tuto akci je nutné přihlášení.' });
     if (!roles.includes(req.member.role)) return res.status(403).json({ error: 'NEDOSTATECNA_PRAVA', message: 'Nemáte oprávnění k této akci.' });
     next();
