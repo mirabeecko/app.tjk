@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=39';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=39';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=40';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=40';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -235,6 +235,7 @@ function closeMenu() {
   if (!menu) return;
   menu.classList.remove('open');
   menu.hidden = true;
+  document.body.classList.remove('menu-open');
   [btn, more].forEach((b) => {
     if (b) {
       b.classList.remove('active');
@@ -252,6 +253,8 @@ function setupMenu() {
     ev.stopPropagation();
     const open = menu.classList.toggle('open');
     menu.hidden = !open;
+    // Na mobilu schováme spodní dock, dokud je menu otevřené (jinak ho překrývá)
+    document.body.classList.toggle('menu-open', open);
     [btn, more].forEach((b) => {
       if (b && b !== button) b.classList.remove('active');
     });

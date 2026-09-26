@@ -19,6 +19,10 @@ const API = {
       err.data = data;
       throw err;
     }
+    // ZMĚNA STAVU → zneplatnit cache /me. Bez tohoto se po zápisu (např. uložení
+    // souhlasů) ještě 15 s vracel STARÝ stav, takže stránka platby tvrdila
+    // „nejdřív potvrďte souhlasy“ i u dokumentů, které uživatel právě podepsal.
+    if (method !== 'GET') meLoadedAt = 0;
     return data;
   },
   get: (path) => API.request('GET', path),

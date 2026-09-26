@@ -58,6 +58,15 @@ create table if not exists app.members (
   guardian_status    text not null default 'not_required',  -- not_required|pending|granted|rejected
   guardian_granted_at timestamptz,
   guardian_ip        text,
+  -- Účel registrace: clenstvi | vstup — členství NENÍ podmínkou vstupu tam,
+  -- kde provoz počítá i s nečleny (provozní řád čl. 1.3)
+  intent             text not null default 'clenstvi',
+  entry_pin_hash     text,               -- scrypt hash vstupního PINu (ověření totožnosti u vstupu)
+  entry_pin_set_at   timestamptz,
+  guardian_verified_method text,         -- email_odkaz | rodny_list | doklad_totoznosti | ...
+  guardian_verified_by     uuid,
+  guardian_verified_at     timestamptz,
+  guardian_verified_note   text,
   valid_from         timestamptz,
   valid_until        timestamptz,
   created_at         timestamptz not null default now(),
@@ -79,12 +88,17 @@ create index if not exists idx_notifications_member on app.notifications (member
 -- Verzované právní dokumenty (provozní řád, GDPR, …)
 create table if not exists app.doc_versions (
   id            uuid primary key default gen_random_uuid(),
-  doc_key       text not null,          -- provozni_rad|cestne_prohlaseni|gdpr|vzdani_prava
+  doc_key       text not null,          -- provozni_rad|cestne_prohlaseni|gdpr|pouceni_rizika|...
   version       integer not null,
   title         text not null,
   content       text not null,
   content_hash  text not null,          -- sha256
   effective_from timestamptz not null,
+  -- status: active | retired (retired = historická verze; neruší se znění ani
+  -- souhlasy, jen povinnost potvrzení — viz 20260928 migrace)
+  status        text not null default 'active',
+  superseded_by text,
+  status_note   text not null default '',
   created_at    timestamptz not null default now(),
   unique (doc_key, version)
 );
@@ -101,6 +115,11 @@ create table if not exists app.consents (
   granted_at    timestamptz not null default now(),
   ip            text not null,
   user_agent    text,
+  -- Jak bylo potvrzení ověřeno (aby pravidla nepotvrzoval za jiného někdo další):
+  -- password = znovu zadání hesla účtu, session = jen přihlášení,
+  -- guardian_email = ověření kontrolou e-mailového odkazu zákonného zástupce
+  auth_method   text not null default 'session',
+  auth_note     text not null default '',
   unique (member_id, doc_key, signer_type)
 );
 
@@ -288,3 +307,14 @@ create table if not exists app.product_variants (
   created_at    timestamptz not null default now()
 );
 create index if not exists idx_variants_product on app.product_variants (product_id, active);
+
+-- ============================================================
+-- POZOR: tento soubor je ZÁKLADNÍ schéma. Novější tabulky a sloupce přidávají
+-- migrace v supabase/migrations/ — na existující i nové DB je aplikujte v pořadí:
+--   1) 20260905_membership_kind_public_members.sql
+--   2) 20260927_airbag_entries_dozor_audit.sql      (entries, membership_audit,
+--      dozor_invites, blokace účtu, fotky, indexy)
+--   3) 20260928_pouceni_instruktaz_provozni_kniha.sql (poučení o rizicích místo
+--      vzdání se práva, praktická instruktáž, provozní kniha, ověření vazby
+--      zákonného zástupce, vstupní PIN a účel registrace, parametry k doplnění)
+-- ============================================================

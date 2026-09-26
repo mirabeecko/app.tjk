@@ -59,15 +59,27 @@ function statTile(label, value, sub, iconName) {
  * ========================================================================= */
 
 let dozorLastCard = null;
+let dozorLastPayload = null;
+let dozorLastPin = null;
 let dozorCamera = null;
 
-async function openCard(payload, { record = true } = {}) {
+/** Stavová „karta“ pro rozlišení: dokument × instruktáž × vstup. */
+function stateBox(label, ok, emphasized) {
+  return el('div', { class: 'state-box ' + (ok ? 'yes' : 'no') + (emphasized ? ' big' : '') }, [
+    el('span', { class: 'sb-k', text: label }),
+    el('span', { class: 'sb-v', text: ok ? 'ANO' : 'NE' }),
+  ]);
+}
+
+async function openCard(payload, { record = true, identityPin = null } = {}) {
   const box = $('#dozor-result');
   if (!box) return;
   box.innerHTML = '';
   box.append(el('div', { class: 'loading-row' }, [el('span', { class: 'spinner' }), ' Načítám údaje…']));
+  dozorLastPayload = payload;
+  dozorLastPin = identityPin;
   try {
-    const res = await API.post('/dozor/lookup', { qrPayload: payload, record });
+    const res = await API.post('/dozor/lookup', { qrPayload: payload, record, identityPin });
     renderCard(res.card, res.entryId);
   } catch (err) {
     box.innerHTML = '';
@@ -148,19 +160,92 @@ function renderCard(c, entryId) {
     ]),
   ]);
 
+  // ---- PŘIPRAVENOST: tři ODDĚLENÉ skutečnosti (nesmějí se slévat) ----
+  const acc = c.access || {};
+  const statements = el('div', { class: 'dc-section' }, [
+    el('h3', {}, [ico('info', 18), ' Stav podle provozního řádu (čl. 3)']),
+    el('div', { class: 'state-row' }, [
+      stateBox('Dokument potvrzen', acc.documentsConfirmed),
+      stateBox('Instruktáž absolvována', acc.instructionCompleted),
+      stateBox('Vstup / provoz povolen', acc.entryAllowed, true),
+    ]),
+    (acc.blocking && acc.blocking.length)
+      ? el('div', { class: 'blocking-list' }, [
+        el('div', { class: 'bl-title', text: 'Co brání vstupu:' }),
+        ...acc.blocking.map((b) => el('div', { class: 'bl-item' }, [
+          ico('alert', 15),
+          el('span', { text: `${b.label}: ${b.message || ''}` }),
+        ])),
+      ])
+      : null,
+    // Denní kontrola a provozní den
+    c.day ? el('div', { class: 'dc-note ' + (c.day.verdict === 'vyhovuje' ? '' : 'warn') }, [
+      ico(c.day.verdict === 'vyhovuje' ? 'check' : 'alert', 15),
+      el('span', { text: `Provozní den ${c.day.day}: kontrola ${c.day.verdict}${c.day.openedAt ? `, otevřel ${c.day.dozorName || '—'} (${czDateTime(c.day.openedAt)})` : ', provoz není otevřen'}${c.day.interrupted ? ` — PROVOZ PŘERUŠEN: ${c.day.interruptReason || ''}` : ''}` }),
+    ]) : null,
+    // Instruktáž
+    c.instruction ? el('div', { class: 'dc-note ' + (c.instruction.ok ? '' : 'warn') }, [
+      ico('shield', 15),
+      el('span', { text: c.instruction.ok
+        ? `Instruktáž absolvována ${czDateTime(c.instruction.last.instructedAt)} (dozor ${c.instruction.last.dozor || '—'}, verze instruktáže v${c.instruction.last.version}${c.instruction.last.source === 'offline' ? ', offline zápis' : ''}).`
+        : `Instruktáž: ${c.instruction.message} (požadovaná verze v${c.instruction.expectedVersion})` }),
+    ]) : null,
+    // Ověření totožnosti
+    c.identityCheck ? el('div', { class: 'dc-note ' + (c.identityCheck.pinOk === false ? 'warn' : '') }, [
+      ico('user', 15),
+      el('span', { text: `Ověření totožnosti: ${c.identityCheck.method}${c.identityCheck.note ? ` — ${c.identityCheck.note}` : ''}` }),
+    ]) : null,
+  ].filter(Boolean));
+
   // ---- zákonný zástupce (u nezletilých) ----
   let guardian = null;
   if (c.guardian) {
-    guardian = el('div', { class: 'dc-section' }, [
+    const gBox = el('div', { class: 'dc-section' }, [
       el('h3', {}, [ico('baby', 18), ' Zákonný zástupce']),
       el('div', { class: 'dc-grid' }, [
         fieldBox('Jméno', c.guardian.name || '—'),
         fieldBox('Vztah', c.guardian.relation || '—'),
-        fieldBox('Souhlas', ({ granted: 'udělen', pending: 'čeká', rejected: 'odmítnut', not_required: 'nevyžadován' })[c.guardian.consentStatus] || c.guardian.consentStatus,
-          c.guardian.consentStatus === 'granted' ? 'ok' : 'warn'),
+        fieldBox('Souhlas s účastí', ({
+          granted: 'udělen', pending: 'čeká', rejected: 'odmítnut', not_required: 'nevyžadován',
+        })[c.guardian.consentStatus] || c.guardian.consentStatus,
+        c.guardian.consentStatus === 'granted' ? 'ok' : 'warn'),
         fieldBox('Udělen', c.guardian.grantedAt ? czDate(c.guardian.grantedAt) : '—'),
+        fieldBox('Ověření vazby k dítěti', c.guardian.relationVerified ? 'ověřeno' : 'NEOVĚŘENO',
+          c.guardian.relationVerified ? 'ok' : 'bad'),
       ]),
     ]);
+    if (c.guardian.relationVerified) {
+      gBox.append(el('div', { class: 'dc-note' }, [ico('check', 15),
+        el('span', { text: `Vazbu ověřil ${c.guardian.verification.by || '—'} (${c.guardian.verification.method}) ${czDateTime(c.guardian.verification.at)}.` })]));
+    } else {
+      // Ověření vazby k dítěti provádí DOZOR podle dokladu (elektronický odkaz ji neprokazuje)
+      const method = el('select', { class: 'input' }, [
+        el('option', { value: '', text: '— způsob ověření —' }),
+        el('option', { value: 'rodny_list', text: 'rodný list' }),
+        el('option', { value: 'doklad_totoznosti', text: 'doklad totožnosti zákonného zástupce' }),
+        el('option', { value: 'pribuzensky_doklad', text: 'jiný doklad o vztahu' }),
+        el('option', { value: 'jine', text: 'jiné (uvedu v poznámce)' }),
+      ]);
+      const note = el('input', { class: 'input', type: 'text', placeholder: 'Poznámka k ověření (nepovinné)' });
+      const btn = el('button', { class: 'btn small', type: 'button' }, [ico('check', 15), ' Zaznamenat ověření vazby']);
+      btn.addEventListener('click', async () => {
+        if (!method.value) { toast('Zvolte způsob ověření (podle jakého dokladu).', true); return; }
+        btn.disabled = true;
+        try {
+          const r = await dozorPost('/dozor/guardian-verify', {
+            memberId: c.identity.memberId, method: method.value, methodNote: note.value.trim(),
+          });
+          if (r.offline) toast('Offline režim: ověření uloženo v zařízení.', true);
+          else toast(r.data.entryAllowed ? 'Vazba ověřena — podmínky vstupu jsou splněny.' : 'Vazba ověřena. Zbývá splnit další podmínky vstupu.');
+          if (dozorLastPayload) await openCard(dozorLastPayload, { record: false, identityPin: dozorLastPin });
+          renderProvozniKniha();
+        } catch (err) { toast(err.message, true); btn.disabled = false; }
+      });
+      gBox.append(el('div', { class: 'dc-note warn' }, [ico('alert', 15),
+        el('span', { text: 'Vazba zákonného zástupce k dítěti NENÍ ověřená. Ověřte ji podle dokladu — bez toho nezletilý nevstoupí. Elektronický odkaz ověřuje jen e-mailovou schránku.' })]));
+      gBox.append(el('div', { class: 'stack' }, [method, note, el('div', { class: 'row-gap' }, [btn])]));
+    }
+    guardian = gBox;
   }
 
   // ---- dokumenty / souhlasy ----
@@ -217,7 +302,9 @@ function renderCard(c, entryId) {
 
   // POZOR: append(null) vloží do stránky text „null“ — a proto se sem přidávají
   // jen sekce, které skutečně existují (guardian jen u nezletilých, audit když je).
-  head.append(...[membership, guardian, docs, entries, audit].filter(Boolean));
+  // Pořadí je záměrné: nejdřív STAV PODMÍNEK VSTUPU, pak členství → zástupce →
+  // dokumenty → vstupy → audit (dozor musí na první pohled vidět, co chybí).
+  head.append(...[statements, membership, guardian, docs, entries, audit].filter(Boolean));
   box.append(head);
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -227,6 +314,258 @@ function fieldBox(label, value, tone) {
     el('span', { class: 'fb-k', text: label }),
     el('span', { class: 'fb-v', text: String(value) }),
   ]);
+}
+
+/* =========================================================================
+ * PROVOZNÍ KNIHA — offline fronta a zápis
+ *
+ * Postup při výpadku internetu (viz provozní řád čl. 10): dozor může otevřít
+ * provozní den, zapsat kontrolu, instruktáž i vstup i bez připojení. Záznam se
+ * uloží do zařízení a po obnovení připojení se doplní do provozní knihy
+ * s označením „offline zápis“ (a s časem skutečného zápisu).
+ * ========================================================================= */
+
+const DOZOR_QUEUE_KEY = 'tjk_dozor_offline_queue';
+
+function offlineQueue() {
+  try { return JSON.parse(localStorage.getItem(DOZOR_QUEUE_KEY) || '[]'); } catch (e) { return []; }
+}
+function offlineQueueSave(q) {
+  try { localStorage.setItem(DOZOR_QUEUE_KEY, JSON.stringify(q)); } catch (e) { /* plné úložiště */ }
+}
+function offlineQueueAdd(endpoint, body) {
+  const q = offlineQueue();
+  const item = {
+    id: `off-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    endpoint, body, at: new Date().toISOString(),
+  };
+  q.push(item);
+  offlineQueueSave(q);
+  return item;
+}
+function offlineQueueCount() { return offlineQueue().length; }
+
+/** Zápis do provozní knihy s automatickým offline režimem. */
+async function dozorPost(endpoint, body) {
+  try {
+    const res = await API.post(endpoint, body);
+    return { ok: true, data: res, offline: false };
+  } catch (err) {
+    // Síťová chyba = offline režim (nikoli odmítnutí serverem)
+    const offline = err && (err.offline === true || err.name === 'TypeError' || /fetch|network|Failed/i.test(err.message || ''));
+    if (!offline) throw err;
+    const item = offlineQueueAdd(endpoint, { ...body, source: 'offline', offlineRef: null });
+    return { ok: true, data: { offline: true, queued: item.id }, offline: true };
+  }
+}
+
+/** Přenesení offline zápisů do systému (po obnovení připojení). */
+async function flushOfflineQueue() {
+  const q = offlineQueue();
+  if (!q.length) return { sent: 0, left: 0 };
+  const left = [];
+  let sent = 0;
+  for (const item of q) {
+    try {
+      await API.post(item.endpoint, { ...item.body, source: 'offline', offlineRef: item.id, at: item.body.at || item.at });
+      sent += 1;
+    } catch (err) {
+      left.push(item);
+    }
+  }
+  offlineQueueSave(left);
+  return { sent, left: left.length };
+}
+
+/** Panel provozní knihy: stav dne, denní kontrola, přerušení, záznamy. */
+async function renderProvozniKniha() {
+  const box = $('#provozni-kniha');
+  if (!box) return;
+  box.innerHTML = '';
+  box.append(el('div', { class: 'loading-row' }, [el('span', { class: 'spinner' }), ' Načítám provozní knihu…']));
+
+  let data;
+  try {
+    data = await API.get('/dozor/provozni-den');
+  } catch (err) {
+    box.innerHTML = '';
+    box.append(el('p', { class: 'muted', text: 'Provozní kniha se nepodařilo načíst (offline?). Zkontrolujte připojení — offline zápisy se uloží do zařízení.' }));
+    return;
+  }
+  box.innerHTML = '';
+
+  const vLabel = { vyhovuje: 'VYHOVUJE', nevyhovuje: 'NEVYHOVUJE', ceka: 'ČEKÁ NA KONTROLU' }[data.verdict] || data.verdict;
+  const tone = data.verdict === 'vyhovuje' ? 'ok' : data.verdict === 'nevyhovuje' ? 'bad' : 'warn';
+
+  box.append(el('div', { class: 'provozni-head' }, [
+    el('div', { class: 'ph-day' }, [ico('calendar', 18), ` Provozní den ${data.day}`]),
+    el('span', { class: `tag ${tone}`, text: vLabel }),
+    data.interrupted ? el('span', { class: 'tag bad', text: 'PROVOZ PŘERUŠEN' }) : null,
+    data.closedAt ? el('span', { class: 'tag', text: 'DEN UKONČEN' }) : null,
+    offlineQueueCount() ? el('span', { class: 'tag warn', text: `offline zápisů k přenosu: ${offlineQueueCount()}` }) : null,
+  ].filter(Boolean)));
+
+  if (data.opened) {
+    box.append(el('div', { class: 'dc-note' }, [ico('check', 15),
+      el('span', { text: `Provoz otevřel ${data.dozorName || '—'} (${czDateTime(data.openedAt)}) — dozor je na místě.` })]));
+  } else {
+    box.append(el('div', { class: 'dc-note warn' }, [ico('alert', 15),
+      el('span', { text: 'Provozní den není otevřen. Bez zaznamenané vyhovující kontroly aplikace vstup nepovolí.' })]));
+  }
+
+  // ---- denní kontrola ----
+  const CHECKS = [
+    ['mattress', 'Matrace (plášť, švy, záplaty)'],
+    ['pressure', 'Tlak / nafouknutí'],
+    ['anchoring', 'Kotvení'],
+    ['ramp', 'Nájezd'],
+    ['surroundings', 'Okolí (dopadová zóna, překážky)'],
+  ];
+  const selects = {};
+  const grid = el('div', { class: 'check-grid' }, CHECKS.map(([key, label]) => {
+    const sel = el('select', { class: 'input' }, [
+      el('option', { value: 'neprovedeno', text: '— neprovedeno —' }),
+      el('option', { value: 'ok', text: 'vyhovuje' }),
+      el('option', { value: 'zavada', text: 'závada' }),
+    ]);
+    const current = data.checks ? (data.checks.find((c) => c.key === key) || {}).value : 'neprovedeno';
+    sel.value = current || 'neprovedeno';
+    selects[key] = sel;
+    return el('div', { class: 'check-item' }, [el('label', { text: label }), sel]);
+  }));
+
+  const checkNote = el('input', { class: 'input', type: 'text', placeholder: 'Poznámka ke kontrole (nepovinné)', value: data.checkNote || '' });
+  const defects = el('input', { class: 'input', type: 'text', placeholder: 'Zjištěné závady (co je potřeba opravit)', value: data.defects || '' });
+  const present = el('input', { type: 'checkbox', checked: 'checked' });
+
+  const saveBtn = el('button', { class: 'btn primary', type: 'submit' }, [ico('check', 18), data.opened ? ' Uložit kontrolu' : ' Otevřít provozní den']);
+  const checkForm = el('form', { class: 'stack' }, [
+    grid,
+    el('div', { class: 'form-row' }, [checkNote, defects]),
+    el('label', { class: 'check' }, [present, el('span', { text: ' Potvrzuji, že jsem jako dozor přítomen na místě' })]),
+    el('div', { class: 'row-gap' }, [saveBtn]),
+  ]);
+  checkForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Ukládám…';
+    const body = {
+      day: data.day,
+      mattress: selects.mattress.value,
+      pressure: selects.pressure.value,
+      anchoring: selects.anchoring.value,
+      ramp: selects.ramp.value,
+      surroundings: selects.surroundings.value,
+      checkNote: checkNote.value.trim(),
+      defects: defects.value.trim(),
+      dozorPresent: present.checked,
+    };
+    try {
+      const r = await dozorPost('/dozor/provozni-den', body);
+      if (r.offline) {
+        toast('Offline režim: kontrola uložena v zařízení, přenese se po obnovení připojení.', true);
+      } else {
+        toast(r.data.verdict === 'vyhovuje'
+          ? 'Kontrola vyhovuje — provoz je otevřen, vstupy lze povolit.'
+          : 'Kontrola NEVYHOVUJE — provoz nezahajujte a závadu odstraňte.', r.data.verdict !== 'vyhovuje');
+      }
+      renderProvozniKniha();
+    } catch (err) {
+      toast(err.message || 'Kontrolu se nepodařilo uložit.', true);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = data.opened ? 'Uložit kontrolu' : 'Otevřít provozní den';
+    }
+  });
+  box.append(el('details', { class: 'doc-details', open: data.opened ? null : 'open' }, [
+    el('summary', { text: 'Denní kontrola zařízení (matrace, tlak, kotvení, nájezd, okolí)' }),
+    el('div', { class: 'doc-body' }, [checkForm]),
+  ]));
+
+  // ---- přerušení / obnovení / ukončení ----
+  const reason = el('input', { class: 'input', type: 'text', placeholder: 'Důvod přerušení (např. mokrý povrch, závada kotvení)' });
+  const interruptBtn = el('button', { class: 'btn ghost', type: 'button' }, [ico('alert', 16), ' Přerušit provoz']);
+  interruptBtn.addEventListener('click', async () => {
+    if (!reason.value.trim()) { toast('Uveďte důvod přerušení.', true); return; }
+    try {
+      const r = await dozorPost('/dozor/provozni-den/preruseni', { action: 'interrupt', reason: reason.value.trim(), day: data.day });
+      toast(r.offline ? 'Offline: přerušení uloženo v zařízení.' : 'Provoz přerušen — vstupy jsou zablokované.');
+      renderProvozniKniha();
+    } catch (err) { toast(err.message, true); }
+  });
+  const resumeBtn = el('button', { class: 'btn', type: 'button' }, [ico('check', 16), ' Obnovit provoz']);
+  resumeBtn.addEventListener('click', async () => {
+    try {
+      const r = await dozorPost('/dozor/provozni-den/preruseni', { action: 'resume', note: reason.value.trim(), day: data.day });
+      toast(r.offline ? 'Offline: obnovení uloženo v zařízení.' : 'Provoz obnoven.');
+      renderProvozniKniha();
+    } catch (err) { toast(err.message, true); }
+  });
+  const closeBtn = el('button', { class: 'btn ghost', type: 'button' }, [ico('clock', 16), ' Ukončit provozní den']);
+  closeBtn.addEventListener('click', async () => {
+    if (!confirm('Ukončit provozní den? Další vstupy budou možné až po novém otevření dne.')) return;
+    try {
+      await dozorPost('/dozor/provozni-den/ukonceni', { day: data.day });
+      toast('Provozní den ukončen.');
+      renderProvozniKniha();
+    } catch (err) { toast(err.message, true); }
+  });
+  box.append(el('div', { class: 'stack' }, [reason, el('div', { class: 'row-gap' }, [interruptBtn, resumeBtn, closeBtn])]));
+
+  // ---- záznamy dne ----
+  if (data.records && data.records.length) {
+    box.append(el('h3', { class: 'panel-title' }, [ico('file', 16), ` Záznamy dne (${data.records.length})`]));
+    box.append(el('div', { class: 'doc-list' }, data.records.slice(-25).reverse().map((z) =>
+      el('div', { class: 'doc-row' }, [
+        ico(z.severity === 'critical' ? 'alert' : z.severity === 'warning' ? 'info' : 'check', 15),
+        el('div', { class: 'doc-main' }, [
+          el('div', { class: 'doc-title', text: z.text }),
+          el('div', { class: 'doc-meta', text: `${z.dozor || '—'} · ${czDateTime(z.at)}${z.offline ? ' · offline zápis' : ''}` }),
+        ]),
+        el('span', { class: 'doc-state', text: z.type }),
+      ]))));
+  }
+  box.append(el('p', { class: 'muted small', text: `Dnes zaznamenaných instruktáží: ${data.instructionsToday}. Instruktáž se od potvrzení dokumentů liší — viz panel „Praktická instruktáž“.` }));
+}
+
+/** Panel praktické instruktáže (záznam vytváří dozor PO instruktáži). */
+function renderInstruktazPanel() {
+  const box = $('#dozor-instruktaz');
+  if (!box) return;
+  const nameInput = el('input', { class: 'input', type: 'text', placeholder: 'Účastník (jméno, pokud nemá QR/účet)' });
+  const memberId = el('input', { class: 'input', type: 'text', placeholder: 'ID účtu účastníka (vyplní se načtením QR)' });
+  const result = el('select', { class: 'input' }, [
+    el('option', { value: 'absolvoval', text: 'absolvoval' }),
+    el('option', { value: 'neabsolvoval', text: 'neabsolvoval' }),
+  ]);
+  const reason = el('input', { class: 'input', type: 'text', placeholder: 'Důvod neabsolvování / poznámka' });
+  const btn = el('button', { class: 'btn primary', type: 'submit' }, [ico('check', 18), ' Zaznamenat instruktáž']);
+  const f = el('form', { class: 'stack' }, [
+    el('p', { class: 'muted small', text: 'Záznam se vytváří AŽ po praktické instruktáži na místě. Ukládá se identita účastníka, identita dozoru, datum a čas, verze instruktáže a výsledek. Potvrzení dokumentů v aplikaci instruktáž nenahrazuje.' }),
+    el('div', { class: 'form-row' }, [nameInput, memberId]),
+    el('div', { class: 'form-row' }, [result, reason]),
+    el('div', { class: 'row-gap' }, [btn]),
+  ]);
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!nameInput.value.trim() && !memberId.value.trim()) { toast('Zadejte účastníka (QR/ID účtu nebo jméno).', true); return; }
+    if (result.value === 'neabsolvoval' && !reason.value.trim()) { toast('U výsledku „neabsolvoval“ uveďte důvod.', true); return; }
+    btn.disabled = true;
+    try {
+      const r = await dozorPost('/dozor/instruction', {
+        memberId: memberId.value.trim() || undefined,
+        participantName: nameInput.value.trim() || undefined,
+        result: result.value,
+        reason: reason.value.trim(),
+      });
+      if (r.offline) toast('Offline režim: instruktáž uložena v zařízení (přenese se po připojení).', true);
+      else toast(`Instruktáž zaznamenána (${r.data.instruction.result}, verze ${r.data.instruction.docVersion}).`);
+      nameInput.value = ''; reason.value = '';
+      renderProvozniKniha();
+    } catch (err) { toast(err.message, true); }
+    finally { btn.disabled = false; }
+  });
+  box.append(f);
 }
 
 async function viewDozor() {
@@ -239,51 +578,77 @@ async function viewDozor() {
   root.append(el('div', { class: 'dozor-head' }, [
     el('div', {}, [
       el('h1', {}, [ typeof CZ !== 'undefined' ? CZ.greet(meName, 'Dobrý den') : `Dobrý den, ${meName}`, ' ', roleBadge() ]),
-      el('p', { class: 'muted', text: 'Načtěte QR kód členské karty — zobrazí se stav členství, platnost, historie vstupů a souhlasy.' }),
+      el('p', { class: 'muted', text: 'Nejprve otevřete provozní den se zaznamenanou denní kontrolou. Vstup lze povolit jen tehdy, když kontrola vyhovuje, je přítomen dozor, účastník má potvrzené dokumenty, absolvovanou instruktáž a ověřenou totožnost.' }),
     ]),
   ]));
 
-  // ---- vstupní panel ----
+  // ---- 1) PROVOZNÍ KNIHA (musí být první: bez ní nelze nikoho vpustit) ----
+  root.append(el('div', { class: 'panel dozor-panel' }, [
+    el('h2', { class: 'panel-title' }, [ico('file', 18), ' Provozní kniha — denní kontrola a průběh provozu']),
+    el('div', { id: 'provozni-kniha' }, [el('span', { class: 'spinner' })]),
+  ]));
+
+  // ---- 2) PRAKTICKÁ INSTRUKTÁŽ ----
+  root.append(el('div', { class: 'panel' }, [
+    el('h2', { class: 'panel-title' }, [ico('shield', 18), ' Praktická instruktáž (zaznamenává dozor)']),
+    el('div', { id: 'dozor-instruktaz' }),
+  ]));
+
+  // ---- 3) QR KONTROLA VSTUPU ----
   const input = el('input', { class: 'input', type: 'text', placeholder: 'Vložte nebo naskenujte QR kód…', autofocus: 'autofocus' });
+  // Ověření totožnosti: účastník s nastaveným PINem jej zadává osobně (zabrání
+  // tomu, aby za jiného prošel vstup s cizí kartou).
+  const pin = el('input', { class: 'input pin-input', type: 'password', inputmode: 'numeric', placeholder: 'Vstupní PIN účastníka (zadá účastník osobně)' });
   const form = el('form', { class: 'dozor-form' }, [
     input,
-    el('button', { class: 'btn primary', type: 'submit' }, [ico('qr', 18), ' Načíst QR']),
+    pin,
+    el('button', { class: 'btn primary', type: 'submit' }, [ico('qr', 18), ' Načíst QR a zkontrolovat']),
   ]);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     const v = input.value.trim();
     if (!v) return;
-    openCard(v);
+    openCard(v, { identityPin: pin.value.trim() || null });
     input.value = '';
+    pin.value = '';
   });
 
   const camBtn = el('button', { class: 'btn ghost', type: 'button' }, [ico('qr', 18), ' Skenovat kamerou']);
   camBtn.addEventListener('click', () => toggleCamera(input));
 
   root.append(el('div', { class: 'panel dozor-panel' }, [
+    el('h2', { class: 'panel-title' }, [ico('qr', 18), ' Kontrola vstupu podle QR karty']),
     form, camBtn,
     el('div', { id: 'dozor-cam', class: 'dozor-cam', hidden: 'hidden' }),
-    el('div', { class: 'dozor-hint', text: 'Tip: QR kód najde člen v aplikaci v sekci „Členská karta“.' }),
+    el('div', { class: 'dozor-hint', text: 'Tip: QR kód najde účastník v aplikaci v sekci „Členská karta“. Má-li nastavený vstupní PIN, vyzvěte jej, aby jej zadal osobně — jinak vstup nepovolte.' }),
   ]));
 
   root.append(el('div', { id: 'dozor-result', class: 'dozor-result' }));
 
-  // ---- rychlý záznam návštěvníka bez QR ----
+  // ---- 4) rychlý záznam návštěvníka bez QR ----
   const nName = el('input', { class: 'input', type: 'text', placeholder: 'Jméno návštěvníka' });
   const nKind = el('select', { class: 'input' }, [
     el('option', { value: 'neclen', text: 'Nečlen / host' }),
     el('option', { value: 'clen', text: 'Člen' }),
   ]);
   const nNote = el('input', { class: 'input', type: 'text', placeholder: 'Poznámka (nepovinné)' });
-  const nForm = el('form', { class: 'manual-form' }, [nName, nKind, nNote,
+  const nDoc = el('select', { class: 'input' }, [
+    el('option', { value: 'manual+doklad', text: 'Ověřeno podle dokladu' }),
+    el('option', { value: 'manual', text: 'Bez ověření dokladu (výjimka)' }),
+  ]);
+  const nForm = el('form', { class: 'manual-form' }, [nName, nKind, nDoc, nNote,
     el('button', { class: 'btn', type: 'submit' }, [ico('edit', 16), ' Zaevidovat vstup']),
   ]);
   nForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!nName.value.trim()) { toast('Zadejte jméno návštěvníka.', true); return; }
     try {
-      await API.post('/dozor/entry', { personName: nName.value.trim(), kind: nKind.value, note: nNote.value.trim() });
-      toast('Vstup zaevidován.');
+      const r = await dozorPost('/dozor/entry', {
+        personName: nName.value.trim(), kind: nKind.value,
+        identityCheck: nDoc.value, note: nNote.value.trim(),
+      });
+      if (r.offline) toast('Offline režim: vstup uložen v zařízení, přenese se po připojení.', true);
+      else toast('Vstup zaevidován.');
       nName.value = ''; nNote.value = '';
       loadRecentEntries();
     } catch (err) { toast(err.message || 'Záznam se nepodařil.', true); }
@@ -291,6 +656,7 @@ async function viewDozor() {
 
   root.append(el('div', { class: 'panel' }, [
     el('h2', { class: 'panel-title' }, [ico('edit', 18), ' Návštěvník bez QR kódu']),
+    el('p', { class: 'muted small', text: 'Ruční záznam podléhá stejným podmínkám: bez otevřeného provozního dne s vyhovující kontrolou aplikace vstup nepovolí.' }),
     nForm,
   ]));
 
@@ -304,6 +670,17 @@ async function viewDozor() {
     el('div', { id: 'dozor-recent' }, [el('span', { class: 'spinner' })]),
   ]));
 
+  // ---- OFFLINE: přenos zápisů po obnovení připojení ----
+  if (offlineQueueCount()) {
+    try {
+      const r = await flushOfflineQueue();
+      if (r.sent) toast(`Přeneseno ${r.sent} offline zápisů do provozní knihy.`);
+      if (r.left) toast(`${r.left} offline zápisů se nepodařilo přenést — zkuste to znovu.`, true);
+    } catch (e) { /* zůstává ve frontě */ }
+  }
+
+  renderProvozniKniha();
+  renderInstruktazPanel();
   loadDozorStats();
   loadRecentEntries();
 }

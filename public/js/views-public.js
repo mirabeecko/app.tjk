@@ -88,7 +88,7 @@ async function viewLanding() {
 
     const info = el('div', { class: 'card soft' }, [
       el('h3', { text: 'Podmínky provozu' }),
-      el('p', { class: 'muted', text: 'Používání dopadové matrace se řídí provozním řádem. Každý uživatel uděluje souhlasy (provozní řád, čestné prohlášení, GDPR, vzdání se práva) s auditní stopou.' }),
+      el('p', { class: 'muted', text: 'Používání dopadové matrace se řídí provozním řádem. Vstup mají členové i nečlenové s jednorázovým vstupem. Každý účastník potvrzuje povinné dokumenty (provozní řád, poučení o rizicích a potvrzení pravidel účasti, čestné prohlášení, GDPR) s auditní stopou — navíc musí absolvovat praktickou instruktáž u dozora.' }),
       el('button', { class: 'btn ghost small', text: 'Provozní řád a podmínky', onclick: () => { location.hash = '#/podminky'; } }),
     ]);
 
@@ -162,13 +162,13 @@ async function viewRules() {
 
   // pravidla (každé s ikonou)
   const RULES = [
-    { icon: 'user', t: 'Pouze pro členy', d: 'Zařízení spolku jsou určena především pro členy. Návštěvy jsou možné pouze v doprovodu člena a jen s vědomím dozoru.' },
-    { icon: 'ban', t: 'Vždy jen jedna osoba', d: 'Na matraci skáče vždy pouze jedna osoba — nikdy více lidí najednou. Další čeká v bezpečné vzdálenosti.' },
-
+    { icon: 'user', t: 'Pro členy i nečleny', d: 'Na zařízení má vstup člen spolku s uhrazeným příspěvkem i nečlen s platným jednorázovým vstupem. Pravidla bezpečnosti a dozoru platí pro oba stejně — členství přináší jen zvýhodněnou cenu.' },
+    { icon: 'ban', t: 'Vždy jen jedna osoba', d: 'Na matraci skáče vždy pouze jedna osoba — nikdy více lidí najednou. Další čeká v bezpečné vzdálenosti a vstupuje až po pokynu dozoru.' },
+    { icon: 'shield', t: 'Podmínky vstupu (čl. 3 řádu)', d: 'Potvrzené dokumenty v aktuální verzi, absolvovaná praktická instruktáž u dozora, ověřená totožnost (QR karta + fotografie, případně vstupní PIN) a vyhovující denní kontrola zařízení s přítomným dozorem. Potvrzení dokumentů samo o sobě nestačí.' },
     { icon: 'calendar', t: 'Rezervace slotů', d: 'Slot si předem rezervujte v aplikaci (sekce Rezervace). Bez rezervace záleží na volné kapacitě — přednost mají rezervovaní.' },
-    { icon: 'alert', t: 'Bezpečnost na prvním místě', d: 'Používání je na vlastní odpovědnost. Člen potvrzuje zdravotní způsobilost čestným prohlášením. Při zdravotních potížích se nepokračuje.' },
-    { icon: 'bag', t: 'Vhodné vybavení', d: 'Vhodná obuv a oblečení bez zipů a ostrých předmětů. Na zařízení se nevstupuje s ostrými nástroji ani v botách s hroty.' },
-    { icon: 'shield', t: 'Pokyny dozoru jsou závazné', d: 'V případě nebezpečí nebo sporu rozhoduje dozor. Jeho pokyny je nutné vždy uposlechnout.' },
+    { icon: 'alert', t: 'Bezpečnost na prvním místě', d: 'Účast je dobrovolná a riziková — hrozí vážný úraz hlavy, páteře i končetin. Potvrzení dokumentů neomezuje vaše zákonná práva při vzniku újmy; odpovědnost provozovatele za stav zařízení a dohled zůstává.' },
+    { icon: 'bag', t: 'Vhodné vybavení', d: 'Povinná je přilba s ochranou brady, chránič páteře, chrániče kolen a loktů a rukavice. Oblečení bez zipů a ostrých předmětů.' },
+    { icon: 'shield', t: 'Pokyny dozoru jsou závazné', d: 'V případě nebezpečí nebo sporu rozhoduje dozor. Jeho pokyny je nutné vždy uposlechnout — včetně přerušení vaší účasti.' },
   ];
 
   const card = el('div', { class: 'card' });
@@ -214,9 +214,47 @@ async function viewRules() {
   // odkaz na plné znění
   root.append(el('div', { class: 'card soft' }, [
     el('h3', { text: 'Provozní řád a podmínky' }),
-    el('p', { class: 'muted small', text: 'Kompletní znění provozního řádu, čestného prohlášení, GDPR a vzdání se práva na náhradu újmy. Verze dokumentů jsou součástí auditní stopy souhlasů.' }),
+    el('p', { class: 'muted small', text: 'Kompletní znění provozního řádu, poučení o rizicích a potvrzení pravidel účasti, čestného prohlášení a GDPR. Verze dokumentů i otisky znění (SHA-256) jsou součástí auditní stopy potvrzení.' }),
     el('a', { class: 'btn ghost small', href: '#/podminky', text: 'Zobrazit provozní řád a podmínky →' }),
   ]));
+
+  // Co ještě není potvrzené z dokumentace výrobce (řád je do té doby PROZATÍMNÍ)
+  const params = el('div', { class: 'card' }, [
+    el('h3', { text: 'Parametry čekající na doplnění' }),
+    el('p', { class: 'muted small', text: 'Provozní řád neobsahuje odhadnuté technické limity. Tyto údaje se doplní z dokumentace výrobce nebo z posouzení skutečného místa a teprve pak je řád platný v plném rozsahu.' }),
+    el('div', { id: 'op-params', class: 'doc-list' }, [el('span', { class: 'spinner' })]),
+  ]);
+  root.append(params);
+  loadOpParameters();
+}
+
+/** Výpis parametrů čekajících na potvrzení (bez vymyšlených hodnot). */
+async function loadOpParameters() {
+  const box = $('#op-params');
+  if (!box) return;
+  try {
+    const data = await API.get('/op-parameters');
+    box.innerHTML = '';
+    if (!data.parameters.length) { box.append(el('p', { class: 'muted small', text: 'Žádné parametry.' })); return; }
+    for (const p of data.parameters) {
+      box.append(el('div', { class: 'doc-row' }, [
+        ico(p.status === 'potvrzeno' ? 'check' : 'alert', 15),
+        el('div', { class: 'doc-main' }, [
+          el('div', { class: 'doc-title', text: p.label }),
+          el('div', { class: 'doc-meta', text: p.status === 'potvrzeno'
+            ? `potvrzeno: ${p.value} · zdroj: ${p.sourceNote || '—'}${p.confirmedBy ? ` · ${p.confirmedBy}` : ''}`
+            : `vyžaduje potvrzení: ${p.sourceRequired}` }),
+        ]),
+        el('span', { class: 'doc-state ' + (p.status === 'potvrzeno' ? 'ok' : 'warn'), text: p.status === 'potvrzeno' ? 'potvrzeno' : 'čeká na doplnění' }),
+      ]));
+    }
+    if (!data.rulesFinal) {
+      box.append(el('p', { class: 'muted small', text: `Provozní řád je do doplnění ${data.pendingCount} parametrů označen jako PROZATÍMNÍ. Texty také nejsou označeny jako právně schválené — finální znění a pojistné krytí potvrzuje odpovědná osoba spolku.` }));
+    }
+  } catch (err) {
+    box.innerHTML = '';
+    box.append(el('p', { class: 'muted small', text: 'Seznam parametrů se nepodařilo načíst.' }));
+  }
 }
 
 /* ---------- PODMÍNKY (provozní řád, offline dostupný) ---------- */
@@ -240,6 +278,24 @@ async function viewDocs() {
       ]),
     ]));
   }
+  // Historické (vyřazené) dokumenty — kvůli dohledatelnosti starších potvrzení
+  try {
+    const retired = (await API.get('/docs?includeRetired=1&slim=1')).docs.filter((d) => d.status === 'retired');
+    if (retired.length) {
+      root.append(el('div', { class: 'card soft' }, [
+        el('h3', { text: 'Historické dokumenty (už se nevyžadují)' }),
+        el('p', { class: 'muted small', text: 'Tato znění se v aplikaci už nepoužívají jako podmínka vstupu. Zůstávají dohledatelná proto, že s nimi dřívější účastníci potvrdili souhlas — jejich potvrzení se nemažou ani nepřepisují.' }),
+        ...retired.map((d) => el('div', { class: 'doc-row' }, [
+          ico('info', 15),
+          el('div', { class: 'doc-main' }, [
+            el('div', { class: 'doc-title', text: `${d.title} (verze ${d.version})` }),
+            el('div', { class: 'doc-meta', text: d.supersededBy ? `nahrazeno dokumentem: ${d.supersededByTitle || d.supersededBy}` : (d.statusNote || '') }),
+          ]),
+          el('span', { class: 'doc-state warn', text: 'historický' }),
+        ])),
+      ]));
+    }
+  } catch (e) { /* offline */ }
   // offline kopie pro režim bez připojení
   if (docs.length) saveOfflineDocs(docs);
 }
@@ -404,6 +460,9 @@ async function viewRegister() {
       email: data.email, phone: data.phone,
       gender: data.gender || null,
       photo: photoData,
+      // ÚČEL REGISTRACE se posílá serveru: 'vstup' nevyžaduje dokumenty členství
+      // (stanovy) — členství není podmínkou vstupu pro nečleny.
+      intent: dailyIntent ? 'vstup' : 'clenstvi',
     };
     if (!photoData) {
       fieldError(form, 'photoFile', 'Fotografie je povinná.');
@@ -580,7 +639,9 @@ async function viewGuardian(token) {
           el('small', { text: `Narozen(a): ${m.birthDate} · Kategorie: ${MEMBERSHIP_LABEL[m.membershipType] || m.membershipType}` }),
         ]),
       ]),
-      el('p', { class: 'muted', text: 'Tímto souhlasem potvrzujete, že jako zákonný zástupce souhlasíte s členstvím výše uvedeného nezletilého a s níže uvedenými dokumenty. Souhlas bude opatřen časovým razítkem a uložen do auditní stopy.' }),
+      el('p', { class: 'muted', text: 'Tímto souhlasem potvrzujete, že jako zákonný zástupce souhlasíte s ÚČASTÍ výše uvedeného nezletilého (členství a/nebo jednorázový vstup) a s uvedeným dokumentem. Souhlas se ukládá s časovým údajem serveru a vaší e-mailovou identitou do auditní stopy aplikace.' }),
+      el('p', { class: 'alert warn small', text: 'Souhlas neobsahuje vzdání se práva nezletilého na náhradu újmy a nic takového nepodepisujete — zákonná práva dítěte při vzniku újmy zůstávají nedotčena. Pravidla účasti potvrzuje sám nezletilý a praktickou instruktáž zaznamenává dozor na místě.' }),
+      el('p', { class: 'alert info small', text: 'Tento odkaz ověřuje jen přístup k e-mailové schránce. Vazbu k dítěti ověří dozor při první účasti podle dokladu (např. rodného listu) a zaznamená ji.' }),
       el('p', { class: 'alert warn small', text: 'Odkaz je jednorázový a platí 7 dní od odeslání.' }),
     ]),
   ]));
@@ -599,7 +660,8 @@ async function viewGuardian(token) {
     provozni_rad: 'Souhlas s Provozním řádem',
     cestne_prohlaseni: 'Čestné prohlášení o zdravotní způsobilosti',
     gdpr: 'Souhlas se zpracováním osobních údajů (GDPR)',
-    vzdani_prava: 'Vzdání se práva na náhradu újmy (§ 2925 OZ)',
+    pouceni_rizika: 'Poučení o rizicích a potvrzení pravidel účasti',
+    guardian_souhlas: 'Souhlas zákonného zástupce s účastí nezletilého',
   };
 
   const checks = [];
@@ -624,6 +686,17 @@ async function viewGuardian(token) {
   const btn = el('button', { class: 'btn btn-cta btn-block', type: 'submit', text: 'Udělit souhlas zákonného zástupce' });
   form.append(btn);
 
+  // Výslovné prohlášení o zákonném zastoupení — bez něj nelze souhlas uložit.
+  const declare = el('label', { class: 'check' }, [
+    el('input', { type: 'checkbox', name: 'declareGuardian' }),
+    el('span', {}, [
+      el('span', { class: 'check-title', text: 'Prohlašuji, že jsem zákonným zástupcem uvedeného nezletilého' }),
+      el('span', { class: 'check-desc', text: 'Beru na vědomí, že vazbu k dítěti ověří dozor podle dokladu při první účasti, a že tímto souhlasem se nevzdávám žádných práv nezletilého na náhradu újmy.' }),
+    ]),
+  ]);
+  declare.addEventListener('change', () => declare.classList.toggle('checked', $('input', declare).checked));
+  form.append(declare);
+
   root.append(el('div', { class: 'auth-wrap auth-wide' }, [form]));
 
   form.addEventListener('submit', async (ev) => {
@@ -631,11 +704,13 @@ async function viewGuardian(token) {
     const data2 = readForm(form);
     const docKeys = checks.filter((c) => $('input', c).checked).map((c) => $('input', c).value);
     if (docKeys.length !== data.docs.length) { toast('Zaškrtněte souhlas se všemi dokumenty', true); return; }
+    if (!$('input', declare).checked) { toast('Potvrďte prosím prohlášení, že jste zákonným zástupcem dítěte.', true); return; }
     btn.disabled = true;
     btn.textContent = 'Ukládám souhlas…';
     try {
       const res = await API.post(`/guardian/${encodeURIComponent(token)}`, {
-        name: data2.name, relation: data2.relation, email: data2.email, phone: data2.phone, docKeys,
+        name: data2.name, relation: data2.relation, email: data2.email, phone: data2.phone,
+        docKeys, declareGuardian: true,
       });
       root.innerHTML = '';
       root.append(
@@ -651,8 +726,9 @@ async function viewGuardian(token) {
             el('h1', { text: 'Souhlas udělen' }),
             el('div', { class: 'auth-success', 'aria-hidden': 'true' }, [ico('check')]),
             el('div', { class: 'alert ok' }, [
-              el('p', { text: `Souhlas zákonného zástupce pro ${m.firstName} ${m.lastName} byl zaznamenán s časovým razítkem (${res.recorded.length} dokumentů).` }),
-              el('p', { class: 'small', text: 'Záznam je součástí auditní stopy — kdo, s čím, kdy a odkud souhlasil.' }),
+              el('p', { text: `Souhlas zákonného zástupce s účastí ${m.firstName} ${m.lastName} byl zaznamenán (${res.recorded.length} dokument).` }),
+              el('p', { class: 'small', text: 'Záznam je součástí auditní stopy (kdo, s čím, kdy a odkud). Jde o elektronický záznam v evidenci spolku — ne o vlastnoruční podpis ani o kvalifikované elektronické časové razítko.' }),
+              el('p', { class: 'small', text: 'Vazba k dítěti zatím není ověřená — ověří ji dozor podle dokladu při první účasti nezletilého. Do té doby nezletilý na zařízení nevstoupí.' }),
             ]),
             el('a', { class: 'btn btn-cta btn-block', href: '#/', text: 'Zpět na úvod' }),
           ]),

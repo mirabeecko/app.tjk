@@ -247,6 +247,26 @@ body::after { content: ""; position: fixed; inset: 0; z-index: -1; background: v
 .mobile-menu.open { display: flex; }
 @keyframes menuIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 @media (min-width: 769px) { .mobile-menu { left: auto; right: 0; width: 300px; } }
+
+/* Menu nesmí přetéct mimo obrazovku. Přihlášený vlastník má až 13 položek
+   (menu ~800 px), takže se dřív poslední položky schovaly pod spodní dock.
+   Nyní: omezená výška + posouvání, vyšší z-index než dock, a dokud je menu
+   otevřené, spodní dock se schová (ať si nepřekáží). */
+.mobile-menu {
+  max-height: calc(100vh - 130px);
+  max-height: calc(100dvh - 130px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 1023px) {
+  .mobile-menu {
+    max-height: calc(100vh - 200px);
+    max-height: calc(100dvh - 200px);
+    z-index: 60; /* nad spodním dockem (z-index 50) */
+  }
+  body.menu-open .bottomnav { display: none; }
+}
 .mm-section { font-size: 0.6rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-2); padding: 10px 14px 4px; }
 .mm-section:not(:first-child) { margin-top: 6px; }
 .mobile-menu .mm-item {

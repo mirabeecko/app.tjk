@@ -16,7 +16,10 @@
     "mobile:android": "npm run mobile:sync && cap open android",
     "mobile:ios": "npm run mobile:sync && cap open ios",
     "verify-consents": "node scripts/verify-consents.js",
-    "evidence:export": "node scripts/verify-consents.js --export ../evidence-pack"
+    "evidence:export": "node scripts/verify-consents.js --export ../evidence-pack",
+    "params:list": "node scripts/confirm-parameter.js --list",
+    "params:confirm": "node scripts/confirm-parameter.js",
+    "verify-flows": "node scripts/verify-flows.js"
   },
   "engines": {
     "node": ">=18"

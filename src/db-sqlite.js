@@ -49,6 +49,35 @@ ensureColumn('members', 'dozor_granted_by', 'dozor_granted_by TEXT');
 // Zpětná konzistence pro existující řádky
 db.prepare("UPDATE members SET membership_kind_source = 'app.tjkrupka.cz' WHERE membership_kind_source IS NULL").run();
 
+// ---- rozšíření 2026-09-28: poučení o rizicích, instruktáž, provozní kniha ----
+// Účel registrace (členství × jednorázový vstup) — členství NESMÍ být podmínkou
+// vstupu tam, kde provoz počítá i s nečleny (viz docs/provozni_rad.md čl. 1.3).
+ensureColumn('members', 'intent', "intent TEXT NOT NULL DEFAULT 'clenstvi'");
+// Vstupní PIN pro ověření totožnosti u vstupu (aby za jiného neklikal někdo další)
+ensureColumn('members', 'entry_pin_hash', 'entry_pin_hash TEXT');
+ensureColumn('members', 'entry_pin_set_at', 'entry_pin_set_at TEXT');
+// Jak byla ověřena vazba zákonného zástupce k nezletilému
+ensureColumn('members', 'guardian_verified_method', 'guardian_verified_method TEXT');
+ensureColumn('members', 'guardian_verified_by', 'guardian_verified_by TEXT');
+ensureColumn('members', 'guardian_verified_at', 'guardian_verified_at TEXT');
+ensureColumn('members', 'guardian_verified_note', 'guardian_verified_note TEXT');
+// Verze dokumentů: stav (aktivní × historická) a čím byla nahrazena
+ensureColumn('doc_versions', 'status', "status TEXT NOT NULL DEFAULT 'active'");
+ensureColumn('doc_versions', 'superseded_by', 'superseded_by TEXT');
+ensureColumn('doc_versions', 'status_note', "status_note TEXT NOT NULL DEFAULT ''");
+// Jak bylo potvrzení dokumentu ověřeno (heslo / session / e-mailový odkaz rodiče)
+ensureColumn('consents', 'auth_method', "auth_method TEXT NOT NULL DEFAULT 'session'");
+ensureColumn('consents', 'auth_note', "auth_note TEXT NOT NULL DEFAULT ''");
+// Snapshot podmínek vstupu u záznamu o vstupu (vstup jen při splnění podmínek)
+ensureColumn('entries', 'day', 'day TEXT');
+ensureColumn('entries', 'provozni_den_id', 'provozni_den_id TEXT');
+ensureColumn('entries', 'day_verdict', 'day_verdict TEXT');
+ensureColumn('entries', 'instruction_id', 'instruction_id TEXT');
+ensureColumn('entries', 'instruction_ok', 'instruction_ok INTEGER NOT NULL DEFAULT 0');
+ensureColumn('entries', 'documents_ok', 'documents_ok INTEGER NOT NULL DEFAULT 0');
+ensureColumn('entries', 'identity_check', "identity_check TEXT NOT NULL DEFAULT ''");
+ensureColumn('entries', 'blocking', "blocking TEXT NOT NULL DEFAULT ''");
+
 // Migrace dat: oprava překlepu v účelu plateb „príspevek" → „prispevek"
 // (staré řádky vzniklé před opravou by se jinak nepropojily s novým kódem).
 db.prepare("UPDATE payments SET purpose = 'prispevek' WHERE purpose = 'príspevek'").run();
@@ -96,6 +125,8 @@ const Members = {
       guardianToken: data.guardianToken ?? null,
       guardianTokenExpires: data.guardianTokenExpires ?? null,
       guardianStatus: data.guardianStatus || 'not_required',
+      // intent: clenstvi | vstup — členství není podmínkou vstupu pro nečleny
+      intent: data.intent === 'vstup' ? 'vstup' : 'clenstvi',
       validFrom: data.validFrom ?? null,
       validUntil: data.validUntil ?? null,
       createdAt: ts,
@@ -104,11 +135,13 @@ const Members = {
     db.prepare(
       `INSERT INTO members (id, member_no, first_name, last_name, birth_date, street, city, zip,
         email, password_hash, phone, membership_type, membership_kind, gender, photo, role, status, guardian_name, guardian_relation,
-        guardian_email, guardian_phone, guardian_token, guardian_token_expires, guardian_status, valid_from, valid_until,
+        guardian_email, guardian_phone, guardian_token, guardian_token_expires, guardian_status,
+        intent, valid_from, valid_until,
         created_at, updated_at)
       VALUES (@id, @memberNo, @firstName, @lastName, @birthDate, @street, @city, @zip,
         @email, @passwordHash, @phone, @membershipType, @membershipKind, @gender, @photo, @role, @status, @guardianName, @guardianRelation,
-        @guardianEmail, @guardianPhone, @guardianToken, @guardianTokenExpires, @guardianStatus, @validFrom, @validUntil,
+        @guardianEmail, @guardianPhone, @guardianToken, @guardianTokenExpires, @guardianStatus,
+        @intent, @validFrom, @validUntil,
         @createdAt, @updatedAt)`
     ).run(row);
     return this.getById(id);
@@ -178,22 +211,25 @@ const DocVersions = {
 
 // ---------- consents (audit trail) ----------
 const Consents = {
-  create({ memberId, docKey, docVersion, contentHash, signerType, identity, ip, userAgent }) {
+  create({ memberId, docKey, docVersion, contentHash, signerType, identity, ip, userAgent, authMethod, authNote }) {
     const id = uuid();
     // Stejná logika jako v db-postgres.js: NOVÁ VERZE dokumentu => souhlas se
     // upsertuje (UNIQUE(member_id, doc_key, signer_type)), aby opakované odeslání
     // formuláře nespadlo na SQLITE_CONSTRAINT (500) — drivery musí být shodné.
     db.prepare(
-      `INSERT INTO consents (id, member_id, doc_key, doc_version, content_hash, signer_type, identity, granted_at, ip, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO consents (id, member_id, doc_key, doc_version, content_hash, signer_type, identity, granted_at, ip, user_agent, auth_method, auth_note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (member_id, doc_key, signer_type) DO UPDATE SET
          doc_version = excluded.doc_version,
          content_hash = excluded.content_hash,
          identity = excluded.identity,
          granted_at = excluded.granted_at,
          ip = excluded.ip,
-         user_agent = excluded.user_agent`
-    ).run(id, memberId, docKey, docVersion, contentHash, signerType, identity, now(), ip, userAgent);
+         user_agent = excluded.user_agent,
+         auth_method = excluded.auth_method,
+         auth_note = excluded.auth_note`
+    ).run(id, memberId, docKey, docVersion, contentHash, signerType, identity, now(), ip, userAgent,
+      authMethod || 'session', authNote || '');
     return this.has(memberId, docKey, signerType);
   },
   getById: (id) => db.prepare('SELECT * FROM consents WHERE id = ?').get(id),

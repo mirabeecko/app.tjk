@@ -16,7 +16,7 @@ async function viewConsent() {
   root.append(el('h1', { text: 'Souhlasy a dokumenty' }), regSteps(1));
   root.append(el('div', { class: 'alert info' }, [
     el('strong', { text: 'Co potvrzujete: ' }),
-    el('span', { text: 'souhlasy jsou rozdělené — členství, služby a (u nezletilých) zákonný zástupce. Každý souhlas se ukládá s verzí dokumentu, časovým razítkem, IP a identitou do auditní stopy.' }),
+    el('span', { text: 'souhlasy jsou rozdělené — členství, služby a (u nezletilých) zákonný zástupce. Každé potvrzení se ukládá s verzí dokumentu, otiskem znění (SHA-256), časem serveru, IP adresou a identitou účtu do auditní stopy. Nejde o vlastnoruční podpis ani o kvalifikované elektronické časové razítko.' }),
   ]));
 
   // čekající souhlas rodiče
@@ -113,21 +113,102 @@ async function viewConsent() {
     root.append(card);
   }
 
+  // ---- PŘIPRAVENOST: potvrzení dokumentů NENÍ totéž co připravenost ke skoku ----
+  const readiness = el('div', { class: 'card soft' }, [
+    el('h3', { text: 'Připravenost ke skoku' }),
+    el('p', { class: 'muted small', text: 'Potvrzené dokumenty jsou jen jedna z podmínek. O vstupu rozhoduje dozor podle provozního řádu (čl. 3) — stav níže ukazuje, co podle evidence aplikace chybí.' }),
+  ]);
+  try {
+    const rd = await API.get('/me/readiness');
+    readiness.append(el('div', { class: 'state-row' }, [
+      el('div', { class: 'state-box ' + (rd.statements.documentsConfirmed ? 'yes' : 'no') }, [
+        el('span', { class: 'sb-k', text: 'Dokument potvrzen' }),
+        el('span', { class: 'sb-v', text: rd.statements.documentsConfirmed ? 'ANO' : 'NE' }),
+      ]),
+      el('div', { class: 'state-box ' + (rd.statements.instructionCompleted ? 'yes' : 'no') }, [
+        el('span', { class: 'sb-k', text: 'Instruktáž absolvována' }),
+        el('span', { class: 'sb-v', text: rd.statements.instructionCompleted ? 'ANO' : 'NE' }),
+      ]),
+      el('div', { class: 'state-box ' + (rd.statements.entryAllowed ? 'yes' : 'no') + ' big' }, [
+        el('span', { class: 'sb-k', text: 'Vstup povolen' }),
+        el('span', { class: 'sb-v', text: rd.statements.entryAllowed ? 'ANO' : 'NE' }),
+      ]),
+    ]));
+    if (!rd.statements.instructionCompleted) {
+      readiness.append(el('p', { class: 'small muted', text: `Praktickou instruktáž provádí a zaznamenává dozor na místě. ${(rd.instruction && rd.instruction.message) || ''}` }));
+    }
+    if (rd.blocking && rd.blocking.length) {
+      readiness.append(el('div', { class: 'blocking-list' }, [
+        el('div', { class: 'bl-title', text: 'Co ještě chybí:' }),
+        ...rd.blocking.map((b) => el('div', { class: 'bl-item' }, [
+          el('span', { text: '•' }),
+          el('span', {}, [el('strong', { text: b.label + ': ' }), b.message || '']),
+        ])),
+      ]));
+    }
+    if (rd.dayState && !rd.dayState.opened) {
+      readiness.append(el('p', { class: 'small muted', text: 'Provozní den zatím není otevřen — vstup je možný jen při zaznamenané vyhovující denní kontrole a přítomnosti dozoru.' }));
+    }
+    if (rd.guardian && rd.guardian.required && !rd.guardian.relationVerified) {
+      readiness.append(el('p', { class: 'small muted', text: 'U nezletilého je potřeba, aby dozor ověřil vazbu zákonného zástupce podle dokladu (např. rodného listu). Elektronický souhlas rodiče to sám o sobě neprokazuje.' }));
+    }
+    if (rd.identity && !rd.identity.pinSet) {
+      readiness.append(el('p', { class: 'small muted', text: 'Nemáte nastavený vstupní PIN. Doporučujeme jej nastavit — u vstupu jej zadáte osobně a zabráníte tomu, aby vaši kartu použil někdo jiný.' }));
+    }
+  } catch (e) {
+    readiness.append(el('p', { class: 'muted small', text: 'Stav připravenosti se nepodařilo načíst.' }));
+  }
+  root.append(readiness);
+
   // akce
   const canContinue = totalMissing === 0 && (!guard || guard.guardianGranted);
   if (allChecks.length === 0 && !canContinue && guard && !guard.guardianGranted) {
     // zbývá jen souhlas rodiče — CTA na platbu zatím ne
   }
   if (allChecks.length) {
+    // Potvrzení dokumentů vyžaduje OVĚŘENÍ, že je potvrzuje sám účastník:
+    // heslo účtu, nebo jednorázový kód zaslaný na jeho e-mail. Bráníme tím tomu,
+    // aby dokumenty odklikl někdo jiný u odemčeného zařízení přihlášeného účtu.
+    const passInput = el('input', { class: 'input', type: 'password', placeholder: 'Vaše heslo k účtu', autocomplete: 'current-password' });
+    const codeInput = el('input', { class: 'input', type: 'text', inputmode: 'numeric', placeholder: 'Ověřovací kód z e-mailu (6 číslic)' });
+    const codeBtn = el('button', { class: 'btn ghost small', type: 'button' }, [ico('mail', 15), ' Poslat ověřovací kód na e-mail']);
+    codeBtn.addEventListener('click', async () => {
+      codeBtn.disabled = true;
+      try {
+        const r = await API.post('/consent-code');
+        toast(r.message || 'Ověřovací kód odeslán na e-mail.');
+      } catch (err) { toast(err.message, true); }
+      finally { codeBtn.disabled = false; }
+    });
+    root.append(el('div', { class: 'card' }, [
+      el('h3', { text: 'Potvrzení dokumentů (ověření, že je potvrzujete vy)' }),
+      el('p', { class: 'muted small', text: 'Potvrzení se ukládá s vaší identitou, časem serveru a IP adresou. Zadejte heslo k účtu — nebo si nechte poslat jednorázový kód na svůj e-mail. Bez ověření dokumenty uložit nelze.' }),
+      el('div', { class: 'form-row' }, [passInput, codeInput]),
+      el('div', { class: 'row-gap' }, [codeBtn]),
+    ]));
     const btn = el('button', { class: 'btn', type: 'button', text: 'Uložit vybrané souhlasy' });
     btn.addEventListener('click', async () => {
       const docKeys = allChecks.filter((c) => $('input', c).checked).map((c) => $('input', c).value);
       if (!docKeys.length) { toast('Zaškrtněte dokumenty, se kterými souhlasíte', true); return; }
-      btn.disabled = true; btn.textContent = 'Ukládám souhlas s časovým razítkem…';
+      if (!passInput.value && !codeInput.value) {
+        toast('Zadejte heslo nebo ověřovací kód z e-mailu — potvrzujete tím, že dokumenty potvrzujete vy osobně.', true);
+        return;
+      }
+      btn.disabled = true; btn.textContent = 'Ukládám potvrzení…';
       try {
-        const res = await API.post('/consent', { docKeys });
-        await refreshMe();
-        toast(`Souhlas zaznamenán (${res.recorded.length} dokumentů)`);
+        const res = await API.post('/consent', {
+          docKeys,
+          password: passInput.value || undefined,
+          code: codeInput.value ? codeInput.value.trim() : undefined,
+        });
+        passInput.value = ''; codeInput.value = '';
+        // force: po uložení chceme OKAMŽITĚ nový stav (ne 15s cache) — jinak
+        // stránka platby dál hlásí chybějící dokumenty.
+        await refreshMe({ force: true });
+        toast(`Potvrzení zaznamenáno (${res.recorded.length} dokumentů)`);
+        if (res.instructionCompleted === false) {
+          toast('Pozor: potvrzené dokumenty ještě neznamenají připravenost ke skoku — chybí praktická instruktáž u dozora.', true);
+        }
         location.hash = '#/souhlasy';
         render();
       } catch (err) {
@@ -209,8 +290,12 @@ const DOC_LABELS = {
   gdpr: 'Souhlas se zpracováním osobních údajů (GDPR)',
   provozni_rad: 'Souhlas s Provozním řádem',
   cestne_prohlaseni: 'Čestné prohlášení o zdravotní způsobilosti',
-  vzdani_prava: 'Vzdání se práva na náhradu újmy',
-  guardian_souhlas: 'Souhlas zákonného zástupce',
+  // Dokument platný od 2026-09-28 (nahradil „Vzdání se práva na náhradu újmy“)
+  pouceni_rizika: 'Poučení o rizicích a potvrzení pravidel účasti',
+  instruktaz_airbag: 'Instruktáž před použitím dopadové matrace',
+  guardian_souhlas: 'Souhlas zákonného zástupce s účastí nezletilého',
+  // historický (vyřazený) dokument — zůstává kvůli starším souhlasům
+  vzdani_prava: 'Vzdání se práva na náhradu újmy (historický dokument)',
 };
 const docLabel = (key, titles) => (titles && titles[key]) || DOC_LABELS[key] || key;
 
@@ -785,8 +870,54 @@ async function viewProfile() {
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Uživatel' }), el('span', { text: (me.kind || 'neclen') === 'clen' ? 'Člen' : 'Nečlen' })]),
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Status' }), statusTag(me.status)]),
     el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Platnost' }), el('span', { text: m.validUntil ? `do ${fmtDate(m.validUntil)}` : '—' })]),
+    el('div', { class: 'list-row' }, [el('span', { class: 'muted', text: 'Účel registrace' }), el('span', { text: me.member.intent === 'vstup' ? 'jednorázový vstup (nečlenství)' : 'členství' })]),
   ]);
   root.append(card);
+
+  // ---- VSTUPNÍ PIN (ověření totožnosti u vstupu) ----
+  const pinCard = el('div', { class: 'card' }, [
+    el('h3', { text: 'Vstupní PIN' }),
+    el('p', { class: 'muted small', text: me.member.entryPinSet
+      ? 'PIN máte nastavený. U vstupu jej zadáte osobně dozoru — bez správného PINu aplikace vstup nepovolí. Tím se brání tomu, aby vaši kartu použil někdo jiný.'
+      : 'PIN zatím nastavený nemáte. Nastavte si jej: u vstupu jej zadáte osobně a zabráníte zneužití své karty. PIN má 4 až 8 číslic.' }),
+  ]);
+  const pinInput = el('input', { class: 'input', type: 'password', inputmode: 'numeric', placeholder: 'Nový PIN (4–8 číslic)' });
+  const pinPass = el('input', { class: 'input', type: 'password', placeholder: 'Vaše heslo k účtu' });
+  const pinBtn = el('button', { class: 'btn small', type: 'button' }, [ico('key', 15), me.member.entryPinSet ? ' Změnit PIN' : ' Nastavit PIN']);
+  pinBtn.addEventListener('click', async () => {
+    pinBtn.disabled = true;
+    try {
+      await API.post('/member/entry-pin', { pin: pinInput.value.trim(), password: pinPass.value });
+      await refreshMe();
+      toast('Vstupní PIN uložen.');
+      render();
+    } catch (err) { toast(err.message, true); }
+    finally { pinBtn.disabled = false; }
+  });
+  pinCard.append(el('div', { class: 'form-row' }, [pinInput, pinPass]), el('div', { class: 'row-gap' }, [pinBtn]));
+  root.append(pinCard);
+
+  // ---- ÚČEL REGISTRACE (členství není podmínkou vstupu) ----
+  const intentCard = el('div', { class: 'card' }, [
+    el('h3', { text: 'Co chci v aplikaci řešit' }),
+    el('p', { class: 'muted small', text: 'Jednorázový vstup nevyžaduje členství. Členství přináší zvýhodněnou cenu vstupu (300 Kč místo 600 Kč za den) a členské výhody.' }),
+  ]);
+  const intentSel = el('select', { class: 'input' }, [
+    el('option', { value: 'clenstvi', text: 'Členství TJK (200 Kč/rok) + vstupy za členskou cenu' }),
+    el('option', { value: 'vstup', text: 'Jen jednorázové vstupy (nečlen / host)' }),
+  ]);
+  intentSel.value = me.member.intent === 'vstup' ? 'vstup' : 'clenstvi';
+  const intentBtn = el('button', { class: 'btn ghost small', type: 'button', text: 'Uložit' });
+  intentBtn.addEventListener('click', async () => {
+    try {
+      const r = await API.post('/member/intent', { intent: intentSel.value });
+      await refreshMe();
+      toast(r.note || 'Uloženo.');
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
+  intentCard.append(el('div', { class: 'form-row' }, [intentSel, intentBtn]));
+  root.append(intentCard);
 
   const btn = el('button', { class: 'btn secondary' }, [ico('logout', 16), ' Odhlásit se']);
   btn.addEventListener('click', async () => {

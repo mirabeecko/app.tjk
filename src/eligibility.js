@@ -12,8 +12,33 @@ const D = require('./db');
 // Součástí členství je i PROVOZNÍ ŘÁD zařízení — člen bez něj nesmí na zařízení
 // vstoupit, proto se vyžaduje už při registraci člena (ne až u služby).
 const MEMBERSHIP_DOCS = ['stanovy', 'provozni_rad', 'gdpr'];
-// Dokumenty, které musí podepsat zákonný zástupce nezletilého při členství
-const GUARDIAN_MEMBERSHIP_DOCS = ['stanovy', 'provozni_rad', 'gdpr', 'guardian_souhlas'];
+// Dokumenty, které musí podepsat zákonný zástupce nezletilého.
+// ZÁMĚRNĚ ODDĚLENÉ od potvrzení účastníka: zástupce uděluje SAMOSTATNÝ souhlas
+// s účastí nezletilého (a nesmí v něm vzdát práva dítěte na náhradu újmy).
+// Provozní řád, poučení o rizicích i zdravotní prohlášení potvrzuje sám účastník.
+const GUARDIAN_MEMBERSHIP_DOCS = ['guardian_souhlas'];
+
+// ÚČEL REGISTRACE (members.intent):
+//   'clenstvi' — uživatel chce členství → dokumenty členství + dokumenty služeb
+//   'vstup'    — uživatel chce jen jednorázový vstup → POUZE dokumenty služeb
+// POZOR: členství NESMÍ být v aplikaci podmínkou vstupu tam, kde provoz počítá
+// i s nečleny (viz docs/provozni_rad.md čl. 1.3). Proto se `stanovy` nevyžadují
+// po tom, kdo si jde koupit jednorázový vstup.
+function intentOf(m) {
+  const i = (m && m.intent) || 'clenstvi';
+  return i === 'vstup' ? 'vstup' : 'clenstvi';
+}
+
+/** Vyřazené (historické) dokumenty se NIKDY nevyžadují k potvrzení. */
+async function withoutRetired(keys) {
+  const out = [];
+  for (const k of keys) {
+    const latest = await D.DocVersions.latest(k);
+    if (!latest || latest.status === 'retired') continue;
+    out.push(k);
+  }
+  return out;
+}
 
 // Věk z data narození — časově bezpečný výpočet (bez posunu o časové pásmo).
 // Zvládá Date (Postgres), ISO string i 'YYYY-MM-DD' (SQLite).
@@ -99,7 +124,8 @@ async function signedDocKeys(memberId, signerType) {
   const out = {};
   for (const c of list) {
     const latest = await D.DocVersions.latest(c.doc_key);
-    if (latest && c.doc_version === latest.version) out[c.doc_key] = true;
+    // vyřazený dokument se nepočítá jako splněný požadavek (už se nevyžaduje)
+    if (latest && latest.status !== 'retired' && c.doc_version === latest.version) out[c.doc_key] = true;
   }
   return out;
 }
@@ -121,28 +147,35 @@ async function checkDocs(memberId, userDocs, guardianDocs) {
 // ── ČLENSTVÍ ──────────────────────────────────────────────────────
 async function membershipEligibility(m) {
   const st = await userState(m);
-  const guardianDocs = st.isMinor ? GUARDIAN_MEMBERSHIP_DOCS : [];
+  const intent = intentOf(m);
+  // Kdo si jde koupit JEN jednorázový vstup, nepotřebuje dokumenty členství
+  // (stanovy) — členství není podmínkou vstupu (viz docs/provozni_rad.md čl. 1.3).
+  const membershipDocs = intent === 'clenstvi' ? await withoutRetired(MEMBERSHIP_DOCS) : [];
+  const guardianDocs = st.isMinor ? await withoutRetired(GUARDIAN_MEMBERSHIP_DOCS) : [];
   // POZOR: i aktivní člen dostává `required`/`missing` — UI souhrnů (stránka
   // Souhlasy, /consent-groups) je čte pro všechny stavy; dřív chyběly a shodily
   // /api/consent-groups na 500 (Cannot read properties of undefined).
-  const d = await checkDocs(m.id, MEMBERSHIP_DOCS, guardianDocs);
+  const d = await checkDocs(m.id, membershipDocs, guardianDocs);
   if (st.isMember) {
     return {
       ok: true,
       state: st,
-      required: { user: MEMBERSHIP_DOCS, guardian: guardianDocs },
+      intent,
+      required: { user: membershipDocs, guardian: guardianDocs },
       missing: { user: [], guardian: [], guardianNotGranted: false },
       message: 'Členství je aktivní.',
     };
   }
-  const ok = d.missingUser.length === 0 && (!st.isMinor || (st.guardianGranted && d.missingGuardian.length === 0));
+  const ok = d.missingUser.length === 0
+    && (!st.isMinor || (st.guardianGranted && d.missingGuardian.length === 0));
   return {
     ok,
     state: st,
-    required: { user: MEMBERSHIP_DOCS, guardian: guardianDocs },
+    intent,
+    required: { user: membershipDocs, guardian: guardianDocs },
     missing: {
       user: d.missingUser,
-      guardian: st.isMinor && !st.guardianGranted ? GUARDIAN_MEMBERSHIP_DOCS : d.missingGuardian,
+      guardian: st.isMinor && !st.guardianGranted ? guardianDocs : d.missingGuardian,
       guardianNotGranted: st.isMinor && !st.guardianGranted,
     },
   };
@@ -180,9 +213,9 @@ async function productEligibility(m, productCode) {
     };
   }
   const docs = D.ProductVariants.parseDocs(variant);
-  const userDocs = docs.userDocs;
+  const userDocs = await withoutRetired(docs.userDocs);
   // nezletilý: zástupce podepisuje guardian_doc_keys (nebo userDocs), jinak žádné
-  const guardianDocs = st.isMinor ? (docs.guardianDocs || userDocs) : [];
+  const guardianDocs = st.isMinor ? await withoutRetired(docs.guardianDocs || docs.userDocs) : [];
   const d = await checkDocs(m.id, userDocs, guardianDocs);
   const guardianOk = !st.isMinor || (st.guardianGranted && d.missingGuardian.length === 0);
   const ok = d.missingUser.length === 0 && guardianOk;
@@ -210,27 +243,31 @@ async function productEligibility(m, productCode) {
 // ── Sjednocené požadavky (UI/status): dokumenty členství + služeb uživatele ──
 async function requiredDocUnion(m) {
   const st = await userState(m);
-  const user = new Set(MEMBERSHIP_DOCS);
+  const intent = intentOf(m);
+  // Dokumenty členství jen tehdy, když uživatel o členství skutečně usiluje
+  // (intent='clenstvi') nebo už členem je. „Vstup“ = jen dokumenty služeb.
+  const user = new Set(intent === 'clenstvi' || st.isMember ? await withoutRetired(MEMBERSHIP_DOCS) : []);
   const guardian = new Set();
   const prods = await D.Products.listActive();
   for (const p of prods) {
     const v = await resolveVariant(p.id, st);
     if (!v) continue;
     const docs = D.ProductVariants.parseDocs(v);
-    for (const k of docs.userDocs) user.add(k);
+    for (const k of await withoutRetired(docs.userDocs)) user.add(k);
     if (st.isMinor) {
       const g = docs.guardianDocs || docs.userDocs;
-      for (const k of g) guardian.add(k);
+      for (const k of await withoutRetired(g)) guardian.add(k);
     }
   }
   if (st.isMinor) {
-    for (const k of GUARDIAN_MEMBERSHIP_DOCS) guardian.add(k);
+    for (const k of await withoutRetired(GUARDIAN_MEMBERSHIP_DOCS)) guardian.add(k);
   }
   return {
     userKeys: [...user],
     guardianKeys: st.isMinor ? [...guardian] : [],
     isMinor: st.isMinor,
     guardianGranted: st.guardianGranted,
+    intent,
     state: st,
   };
 }
@@ -258,6 +295,8 @@ module.exports = {
   signedDocKeysPublic: signedDocKeys,
   requiredDocUnion,
   missingAllDocs,
+  intentOf,
+  withoutRetired,
   MEMBERSHIP_DOCS,
   GUARDIAN_MEMBERSHIP_DOCS,
 };

@@ -149,7 +149,15 @@ SMTP_FROM=Tělovýchovná jednota Krupka <noreply@krupka.cz>
 | Funkce | Stav |
 |---|---|
 | Registrace člena (údaje, typ členství, věková validace) | ✅ |
-| E-souhlas: Provozní řád + čestné prohlášení + GDPR + vzdání se práva § 2925 OZ | ✅ |
+| E-potvrzení: Provozní řád + **Poučení o rizicích a potvrzení pravidel účasti** + čestné prohlášení + GDPR | ✅ |
+| **Poučení o rizicích místo vzdání se práva na náhradu újmy** (§ 2925 OZ odstraněno; historické znění zůstává v auditní stopě jako vyřazené) | ✅ |
+| **Ověření, že dokumenty potvrzuje sám účastník** (heslo účtu, nebo jednorázový kód na jeho e-mail) | ✅ |
+| **Praktická instruktáž jako samostatný záznam** (identita účastníka i dozoru, čas, verze instruktáže, výsledek absolvoval/neabsolvoval) | ✅ |
+| **Provozní kniha** (denní kontrola matrace/tlak/kotvení/nájezd/okolí, závady, přerušení a obnovení provozu, mimořádné události) + offline zápisy | ✅ |
+| Vstup povolen jen při vyhovující kontrole dne + přítomném dozoru + potvrzených dokumentech + instruktáži (+ ověřené vazbě rodiče u nezletilých) | ✅ |
+| **Ověření totožnosti u vstupu**: QR + kontrola fotografie dozorem, volitelně osobně zadaný vstupní PIN | ✅ |
+| Účel registrace: členství × jednorázový vstup (členství není podmínkou vstupu pro nečleny) | ✅ |
+| Parametry k doplnění od výrobce/provozovatele evidované jako „čeká na doplnění“ (žádné odhady v řádu) | ✅ |
 | **Auditní stopa souhlasů** (verze dokumentu + SHA-256 hash + timestamp + IP + identita, nelze obejít) | ✅ |
 | E-souhlas zákonného zástupce (odkaz e-mailem; SMS — stub) | ✅ |
 | Platba členského příspěvku — **Stripe Checkout** (test/live dle klíče) | ✅ |
@@ -165,13 +173,69 @@ SMTP_FROM=Tělovýchovná jednota Krupka <noreply@krupka.cz>
 | Merch (tričko, mikina, čepice, samolepky, bandana) | ✅ bonus |
 | Dev inbox (stub e-maily/SMS — co by uživatel dostal) | ✅ |
 
-## Otestované toky (npm test — 74 checků)
+## Provozní pravidla a doklady (2026-09-28)
 
-1. **Dospělý člen**: registrace (kategorie se určí sama z data narození — dospele/mladez/dite) → souhlasy (platba bez souhlasu = 409, nelze obejít) → platba test mode → active → QR karta → účtenka.
-2. **Mladistvý (16 let)**: registrace s povinnými údaji rodiče → stub e-mail rodiči (odkaz platí 7 dní, jednorázový) → souhlas rodiče přes odkaz (odkaz nelze použít 2×) → souhlasy člena → platba → active.
-3. **Souhlas rodiče — resend a expirace**: „Znovu odeslat e-mail rodiči" rotuje token (starý odkaz zneplatní), expirovaný odkaz → 404, resend pro člena bez souhlasu → 409.
-4. **Dozor**: přehled členů, statistiky, kontrola QR karty (platná i falešná), auditní detail člena. Běžný člen do adminu nevidí (403).
-5. **Bonus**: rezervace (duplicita = 409), merch objednávka, akce s přihlašováním, facilities, superadmin (vlastník).
+Provoz zařízení se řídí těmito verzovanými dokumenty (`docs/*.md`, verzuje je seed;
+každé potvrzení drží verzi + otisk znění SHA-256):
+
+| Dokument | Klíč | K čemu slouží |
+|---|---|---|
+| Provozní řád dopadové matrace | `provozni_rad` | pravidla provozu pro **členy i nečleny**, podmínky vstupu, provozní kniha, offline postup |
+| Poučení o rizicích a potvrzení pravidel účasti | `pouceni_rizika` | **nahradilo** „Vzdání se práva na náhradu újmy (§ 2925 OZ)“ — žádné vzdání se práv neobsahuje |
+| Instruktáž před použitím dopadové matrace | `instruktaz_airbag` | obsah praktické instruktáže; záznam o instruktáži se váže na její verzi |
+| Souhlas zákonného zástupce s účastí nezletilého | `guardian_souhlas` | samostatný souhlas rodiče (oddělený od potvrzení účastníka), bez vzdání se práv dítěte |
+| Čestné prohlášení o zdravotní způsobilosti | `cestne_prohlaseni` | zdravotní způsobilost |
+| Informace o zpracování osobních údajů (GDPR) | `gdpr` | GDPR |
+| Stanovy TJ Krupka, z.s. | `stanovy` | jen pro **členství** — u jednorázového vstupu se nevyžadují |
+| Vzdání se práva na náhradu újmy (§ 2925 OZ) | `vzdani_prava` | **historický, vyřazený** (`status=retired`) — znění i starší souhlasy zůstávají beze změny |
+
+**Tři různé skutečnosti, které se nikde neslévají:**
+
+1. **Dokument potvrzen** — elektronické potvrzení v aktuální verzi dokumentu (u nezletilého navíc samostatný souhlas rodiče).
+2. **Instruktáž absolvována** — záznam, který vytváří **dozor až po praktické instruktáži** (datum a čas, identita účastníka i dozoru, verze instruktáže, výsledek).
+3. **Vstup / provoz povolen** — splněné podmínky provozního dne: otevřený den, vyhovující denní kontrola, přítomný dozor, nepřerušený provoz, ověřená totožnost.
+
+Prohlédnout si to lze v aplikaci (`#/souhlasy` → „Připravenost ke skoku“), v API
+(`GET /api/me/readiness`) a v tisknutelném protokolu (`GET /api/documents/protocol/:memberId`).
+
+### Provozní kniha a offline režim
+
+- Dozor otevírá **provozní den** (`POST /api/dozor/provozni-den`) až po denní kontrole
+  (matrace, tlak/nafouknutí, kotvení, nájezd, okolí). Nevyhovující kontrola = provoz se nezahájí
+  a vstup je zablokovaný.
+- Přerušení/obnovení provozu, závady, mimořádné události a instruktáže se zapisují
+  do provozní knihy (`GET /api/dozor/provozni-kniha?days=14`).
+- **Výpadek internetu:** dozor zapisuje offline (kontrola, instruktáž, vstup) — záznam se
+  uloží v zařízení a po obnovení připojení se přenese s označením „offline zápis“ (postup viz
+  `docs/provozni_rad.md`, čl. 10).
+
+### Parametry čekající na potvrzení (řád je do té doby PROZATÍMNÍ)
+
+Provozní řád **neobsahuje vymyšlené technické limity**. Chybějící údaje jsou evidované jako
+„čeká na doplnění“ a nelze je potvrdit odhadem:
+
+```bash
+npm run params:list      # co chybí a jaký zdroj se vyžaduje (výrobce / posouzení místa)
+npm run params:confirm -- --key tlak --value "…" --source "Dokumentace výrobce XY, str. 7" --by "Jana Nováková, výbor"
+```
+
+### Ověření toků a ukázky protokolů
+
+```bash
+npm test                                     # kompletní sada (183 kontrol)
+node scripts/verify-flows.js --export ../evidence-pack/ukazka   # dospělý člen / nečlen / nezletilý
+node scripts/verify-consents.js               # kontrola otisků všech potvrzení
+```
+
+## Otestované toky (npm test — 183 checků)
+
+1. **Dospělý člen**: registrace (kategorie se určí sama z data narození — dospele/mladez/dite) → potvrzení dokumentů **s ověřením hesla** (bez ověření 401; platba bez potvrzení = 409, nelze obejít) → platba test mode → active → QR karta → účtenka → **vstup povolen až po instruktáži a otevřeném provozním dni**.
+2. **Nečlen (jednorázový vstup)**: registrace s účelem „vstup“ → **bez stanov** → vstup 600 Kč → stejná pravidla vstupu jako u člena; členství koupit bez stanov nelze.
+3. **Nezletilý**: samostatný souhlas rodiče (bez prohlášení o zastoupení jej nelze uložit) → vlastní potvrzení dokumentů nezletilým → vstup povolen až po **ověření vazby rodiče dozorem podle dokladu**.
+4. **Souhlas rodiče — resend a expirace**: „Znovu odeslat e-mail rodiči" rotuje token (starý odkaz zneplatní), expirovaný odkaz → 404, resend pro člena bez souhlasu → 409.
+5. **Dozor a brána vstupu**: denní kontrola (závada → provoz se nezahájí), vyhovující kontrola → provoz otevřen, chybějící instruktáž → vstup zamítnut, instruktáž → vstup povolen, přerušení provozu → zamítnuto, obnovení → povoleno; vstupní PIN a ověření vazby rodiče; dozor nevidí seznam členů (403).
+6. **Změna pravidel**: nová verze provozního řádu → vstup zamítnut do nového potvrzení; historická potvrzení zůstávají v auditní stopě; zásah do znění po potvrzení → kontrola integrity ohlásí problém.
+7. **Bonus**: rezervace (duplicita = 409), merch objednávka, akce s přihlašováním, facilities, superadmin (vlastník).
 
 ## Struktura
 

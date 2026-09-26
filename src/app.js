@@ -100,8 +100,10 @@ function buildApp() {
       }
       // POZOR: HTML (app shell) se cachovat NESMÍ — jinak se uživateli drží stará
       // verze stránky i s odkazy na staré JS/CSS a aplikace se „neaktualizuje“.
+      // no-store (ne jen no-cache): Vercel edge jinak držel staré HTML i hodiny
+      // po nasazení (x-vercel-cache: HIT, age přes 13 000 s).
       if (filePath.endsWith('.html')) {
-        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
       }
     },
   }));
@@ -109,7 +111,10 @@ function buildApp() {
   // SPA fallback (Express 5 — wildcard route syntax se změnila, použijeme middleware)
   app.use((req, res, next) => {
     if (req.method !== 'GET' || req.path.startsWith('/api/')) return next();
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+    // App shell nikdy necachovat (ani na CDN) — po nasazení se musí projevit
+    // hned; jinak uživatel vidí starou verzi aplikace.
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'),
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   });
 
   // error handler

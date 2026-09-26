@@ -14,6 +14,8 @@ const payments = require('./payments');
 const S = require('./supabase-sync');
 const E = require('./eligibility');
 const EVD = require('./evidence');
+const R = require('./readiness');
+const X = require('./db-app');
 const { VALIDITY_DAYS } = require('./seed');
 
 const router = express.Router();
@@ -103,11 +105,15 @@ function publicMember(m) {
     photo: m.photo,
     role: m.role,
     status: m.status,
+    intent: m.intent || 'clenstvi',            // clenstvi | vstup (účel registrace)
+    hasPassword: !!m.password_hash,
+    entryPinSet: !!m.entry_pin_hash,           // ověření totožnosti u vstupu
     validFrom: m.valid_from,
     validUntil: m.valid_until,
     guardianRequired: m.guardian_status !== 'not_required',
     guardianStatus: m.guardian_status,
     guardianEmail: m.guardian_email,
+    guardianVerifiedMethod: m.guardian_verified_method || null,
   };
 }
 
@@ -163,6 +169,10 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
   const b = req.body || {};
   const { firstName, lastName, birthDate, street, city, zip, email, phone, photo, gender } = b;
   const guardian = b.guardian || {};
+  // ÚČEL REGISTRACE: 'clenstvi' (roční členství) | 'vstup' (jednorázový vstup).
+  // Členství NENÍ podmínkou vstupu — provoz počítá i s nečleny, proto se
+  // dokumenty členství (stanovy) vyžadují jen u zájemce o členství.
+  const intent = b.intent === 'vstup' ? 'vstup' : 'clenstvi';
 
   const err = (msg) => res.status(400).json({ error: 'VALIDACE', message: msg });
   if (!firstName || !lastName) return err('Jméno a příjmení je povinné.');
@@ -224,6 +234,7 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
     guardianToken,
     guardianTokenExpires,
     guardianStatus: guardianRequired ? 'pending' : 'not_required',
+    intent,
   });
 
   // STUB e-mail/SMS zákonnému zástupci (žádné reálné odesílání)
@@ -248,6 +259,8 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
   res.json({
     member: publicMember(member),
     guardianRequired,
+    intent,
+    // 'guardian' = čeká se na souhlas zákonného zástupce, jinak dokumenty
     nextStep: guardianRequired ? 'guardian' : 'consent',
   });
 }));
@@ -282,20 +295,57 @@ function invalidateDocsCache() { _docsCache = null; _docsCacheAt = 0; }
 
 router.get('/docs', asyncRoute(async (req, res) => {
   const slim = req.query.slim === '1';
+  const includeRetired = req.query.includeRetired === '1' || req.query.retired === '1';
   const all = await latestDocVersions();
-  const docs = all.map((d) => ({
-    id: d.id,
-    docKey: d.doc_key,
-    version: d.version,
-    title: d.title,
-    // Text dokumentu je největší část odpovědi — posíláme ho jen když je potřeba
-    ...(slim ? {} : { content: d.content }),
-    contentHash: d.content_hash,
-    effectiveFrom: d.effective_from,
-  }));
+  // Lidské názvy dokumentů pro odkaz „nahrazeno dokumentem …“ (klíč je pro člověka nicneříkající)
+  const titles = {};
+  for (const d of all) titles[d.doc_key] = d.title;
+  const docs = all
+    // Vyřazené (historické) dokumenty se běžně nezobrazují jako platné podmínky;
+    // na požádání (?includeRetired=1) je vidět i s odkazem, čím byly nahrazeny.
+    .filter((d) => includeRetired || (d.status || 'active') !== 'retired')
+    .map((d) => ({
+      id: d.id,
+      docKey: d.doc_key,
+      version: d.version,
+      title: d.title,
+      // Text dokumentu je největší část odpovědi — posíláme ho jen když je potřeba
+      ...(slim ? {} : { content: d.content }),
+      contentHash: d.content_hash,
+      effectiveFrom: d.effective_from,
+      status: d.status || 'active',
+      supersededBy: d.superseded_by || null,
+      supersededByTitle: d.superseded_by ? (titles[d.superseded_by] || d.superseded_by) : null,
+      statusNote: d.status_note || '',
+    }));
   // Odpověď je pro všechny stejná a dlouho platná → ať ji drží CDN i prohlížeč.
   res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
-  res.json({ docs, slim });
+  res.json({ docs, slim, includeRetired });
+}));
+
+// ---------- PARAMETRY PROVOZU (co čeká na potvrzení od výrobce / provozovatele) ----
+// Aplikace NIKDY nezobrazuje odhadnuté technické limity: dokud parametr nemá
+// potvrzenou hodnotu se zdrojem, vrací se jako „čeká na doplnění“ bez hodnoty.
+router.get('/op-parameters', asyncRoute(async (req, res) => {
+  const rows = await X.OpParameters.list();
+  res.json({
+    parameters: rows.map((p) => ({
+      key: p.key,
+      label: p.label,
+      unit: p.unit || '',
+      value: p.status === 'potvrzeno' ? p.value : null,
+      status: p.status,
+      statusLabel: p.status === 'potvrzeno' ? 'potvrzeno' : 'čeká na doplnění',
+      sourceRequired: p.source_required,
+      sourceNote: p.status === 'potvrzeno' ? p.source_note : null,
+      confirmedBy: p.confirmed_by_name || null,
+      confirmedAt: p.confirmed_at || null,
+    })),
+    pendingCount: rows.filter((p) => p.status !== 'potvrzeno').length,
+    // Provozní řád je do doplnění parametrů PROZATÍMNÍ (viz docs/provozni_rad.md).
+    rulesFinal: rows.every((p) => p.status === 'potvrzeno'),
+    legalReviewed: false, // texty nejsou označeny jako právně schválené; potvrzuje odpovědná osoba
+  });
 }));
 
 // ---------- veřejná konfigurace (režim e-mailů + plateb + ceny pro UI) ----------
@@ -522,6 +572,7 @@ router.get('/me', A.requireMember, asyncRoute(async (req, res) => {
   const entitlementsList = await D.Entitlements.listForMember(m.id);
   const est = await E.userState(m);
   const kind = est.isMember ? 'clen' : 'neclen';
+  const ready = await R.readiness(m);
   const entitlements = [];
   for (const e of entitlementsList) {
     const prod = await D.Products.getById(e.product_id);
@@ -550,12 +601,40 @@ router.get('/me', A.requireMember, asyncRoute(async (req, res) => {
     membershipRecordedSource: m.membership_kind_source || 'app.tjkrupka.cz',
     access: await hasAccess(m),
     status: effectiveStatus(m),
+    // Rozlišené stavy: potvrzené dokumenty × absolvovaná instruktáž × vstup povolen
+    documentsConfirmed: ready ? ready.statements.documentsConfirmed : false,
+    instructionCompleted: ready ? ready.statements.instructionCompleted : false,
+    readyToJump: ready ? ready.ready : false,
+    readiness: ready
+      ? {
+        day: ready.day,
+        checks: ready.checks,
+        blocking: ready.blocking.map((b) => ({ key: b.key, label: b.label, message: b.message })),
+        instruction: {
+          ok: ready.instruction.ok,
+          expectedVersion: ready.instruction.expectedVersion,
+          last: ready.instruction.last,
+          message: ready.instruction.message,
+        },
+        guardian: ready.guardian,
+        identity: { pinSet: ready.identity.pinSet, warning: ready.identity.warning },
+        dayState: {
+          opened: ready.dayState.opened,
+          verdict: ready.dayState.verdict,
+          interrupted: ready.dayState.interrupted,
+          message: ready.dayState.message,
+        },
+      }
+      : null,
     missingConsents: await memberAllConsents(m.id),
     missingGuardianConsents: m.guardian_status === 'pending' ? await guardianAllConsents(m.id) : [],
     guardianStatus: m.guardian_status,
     consents: consents.map((c) => ({
       docKey: c.doc_key, version: c.doc_version, signerType: c.signer_type,
       grantedAt: c.granted_at, identity: c.identity, ip: c.ip, contentHash: c.content_hash,
+      // Jak bylo potvrzení ověřeno (heslo účtu / jednorázový kód na e-mail /
+      // odkaz zákonného zástupce) — nikdy netvrdíme „vlastnoruční podpis“.
+      authMethod: c.auth_method || 'session',
     })),
     payments: paymentsList.map((p) => ({
       id: p.id, amountCzk: p.amount_czk, purpose: p.purpose, productCode: p.product_code,
@@ -598,9 +677,15 @@ router.post('/notifications/read-all', A.requireMember, asyncRoute(async (req, r
 router.get('/consent-groups', A.requireMember, asyncRoute(async (req, res) => {
   const m = req.member;
   const st = await E.userState(m);
+  const ready = await R.readiness(m);
   const memberSigned = await E.signedDocKeysPublic(m.id, 'member');
   const guardianSigned = st.isMinor ? await E.signedDocKeysPublic(m.id, 'guardian') : null;
-  const docInfo = async (k) => { const d = await D.DocVersions.latest(k); return d ? { docKey: k, title: d.title, version: d.version } : null; };
+  const docInfo = async (k) => {
+    const d = await D.DocVersions.latest(k);
+    // Vyřazený dokument se už nevyžaduje (např. „Vzdání se práva na náhradu újmy“)
+    if (!d || d.status === 'retired') return null;
+    return { docKey: k, title: d.title, version: d.version };
+  };
 
   const groups = [];
   // 1) členství
@@ -652,18 +737,173 @@ router.get('/consent-groups', A.requireMember, asyncRoute(async (req, res) => {
     groups.push(guardianGroup);
   }
 
-  res.json({ ageType: st.ageType, membershipStatus: st.membershipStatus, groups, guardian: guardianGroup });
+  res.json({
+    ageType: st.ageType,
+    membershipStatus: st.membershipStatus,
+    intent: m.intent || 'clenstvi',
+    groups,
+    guardian: guardianGroup,
+    // Názorné rozlišení tří různých skutečností (nesmí se slévat do jedné):
+    // potvrzené dokumenty × absolvovaná instruktáž × povolený vstup.
+    statements: ready ? ready.statements : null,
+    instruction: ready
+      ? {
+        ok: ready.instruction.ok,
+        title: ready.instruction.title,
+        expectedVersion: ready.instruction.expectedVersion,
+        last: ready.instruction.last,
+        message: ready.instruction.message,
+      }
+      : null,
+    blocking: ready ? ready.blocking.map((b) => ({ key: b.key, label: b.label, message: b.message })) : [],
+  });
+}));
+
+// ---------- PŘIPRAVENOST KE SKOKU (účastník) ----------
+// Vrací přesně to, co kontroluje dozor u vstupu — účastník tak vidí, co mu chybí.
+router.get('/me/readiness', A.requireMember, asyncRoute(async (req, res) => {
+  const ready = await R.readiness(req.member, { day: req.query.day || undefined });
+  if (!ready) return res.status(404).json({ error: 'NENALEZENO' });
+  res.json({
+    ready: ready.ready,
+    day: ready.day,
+    checks: ready.checks,
+    statements: ready.statements,
+    documents: {
+      ok: ready.documents.ok,
+      items: ready.documents.items,
+      missingCount: ready.documents.missingCount,
+    },
+    instruction: ready.instruction,
+    guardian: ready.guardian,
+    identity: ready.identity,
+    dayState: {
+      opened: ready.dayState.opened,
+      openedAt: ready.dayState.openedAt,
+      dozorName: ready.dayState.dozorName,
+      verdict: ready.dayState.verdict,
+      checks: ready.dayState.checks,
+      interrupted: ready.dayState.interrupted,
+      interruptReason: ready.dayState.interruptReason,
+      message: ready.dayState.message,
+    },
+  });
+}));
+
+// ---------- ÚČEL REGISTRACE (změna: členství ⇄ jednorázový vstup) ----------
+router.post('/member/intent', A.requireMember, asyncRoute(async (req, res) => {
+  const intent = (req.body || {}).intent === 'vstup' ? 'vstup' : 'clenstvi';
+  const updated = await D.Members.update(req.member.id, { intent });
+  const missing = await memberAllConsents(updated.id);
+  res.json({
+    ok: true,
+    member: publicMember(updated),
+    intent,
+    missingConsents: missing,
+    note: intent === 'clenstvi'
+      ? 'Pro členství je potřeba potvrdit i stanovy spolku.'
+      : 'Pro jednorázový vstup stačí dokumenty služby — členství není podmínkou vstupu.',
+  });
+}));
+
+// ---------- VSTUPNÍ PIN (ověření totožnosti u vstupu) ----------
+// Aby pravidla nepotvrzoval a vstup nevyužíval někdo jiný: účastník si nastaví
+// PIN, který u vstupu zadá osobně na zařízení dozora. Nastavení PINu vyžaduje
+// heslo účtu (jinak by PIN mohl nastavit kdokoli u přihlášeného zařízení).
+router.post('/member/entry-pin', A.requireMember, asyncRoute(async (req, res) => {
+  const m = req.member;
+  const { pin, password } = req.body || {};
+  if (!m.password_hash) {
+    return res.status(409).json({ error: 'CHYBI_HESLO', message: 'Nejprve si nastavte heslo k účtu.' });
+  }
+  if (!password || !Pwd.verify(String(password), m.password_hash)) {
+    return res.status(401).json({ error: 'NEPLATNE_HESLO', message: 'Heslo není správné — PIN nebyl změněn.' });
+  }
+  if (!/^\d{4,8}$/.test(String(pin || ''))) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'PIN musí mít 4 až 8 číslic.' });
+  }
+  const updated = await D.Members.update(m.id, {
+    entry_pin_hash: Pwd.hash(String(pin)),
+    entry_pin_set_at: D.now(),
+  });
+  res.json({
+    ok: true,
+    entryPinSet: !!updated.entry_pin_hash,
+    entryPinSetAt: updated.entry_pin_set_at,
+    note: 'PIN zná jen účastník. U vstupu jej zadá osobně dozoru; bez správného PINu aplikace vstup nepovolí.',
+  });
+}));
+
+// ---------- OVĚŘOVACÍ KÓD pro potvrzení dokumentů (e-mailem) ----------
+// Pro účty bez hesla (např. přihlášení odkazem) je to jediná přiměřená cesta,
+// jak ověřit, že dokumenty potvrzuje skutečně držitel účtu.
+router.post('/consent-code', A.requireMember, asyncRoute(async (req, res) => {
+  const m = req.member;
+  const issued = await X.ConsentCodes.issue(m.id, { purpose: 'consent' });
+  await mailer.sendEmail(m.id, m.email,
+    'Ověřovací kód pro potvrzení dokumentů — TJ Krupka',
+    `Dobrý den,\n\npro potvrzení dokumentů v členské aplikaci Tělovýchovná jednota Krupka zadejte kód:\n\n${issued.code}\n\nKód platí ${issued.ttlMinutes} minut a lze jej použít jednou. Pokud jste o kód nežádali, ignorujte tento e-mail a dokumenty nikomu nepotvrzujte.`);
+  res.json({
+    ok: true,
+    sent: true,
+    expiresAt: issued.expiresAt,
+    ttlMinutes: issued.ttlMinutes,
+    message: `Ověřovací kód jsme poslali na ${m.email}. Platí ${issued.ttlMinutes} minut.`,
+  });
 }));
 
 // ---------- E-SOUHLAS (člen) — audit trail ----------
+// OPATŘENÍ PROTI TOMU, ABY ZA JINÉHO ODLIKL PRAVIDLA NĚKDO DALŠÍ:
+// potvrzení dokumentů vyžaduje OPAKOVANÉ OVĚŘENÍ identity účastníka —
+// buď zadání hesla účtu, nebo jednorázový kód zaslaný na jeho e-mail.
+// Způsob ověření se ukládá k potvrzení (auth_method) a je vidět v protokolu.
 router.post('/consent', A.requireMember, asyncRoute(async (req, res) => {
   const m = req.member;
   const { docKeys } = req.body || {};
+  const password = (req.body || {}).password;
+  const code = (req.body || {}).code;
   if (!Array.isArray(docKeys) || docKeys.length === 0) {
     return res.status(400).json({ error: 'VALIDACE', message: 'Musíte potvrdit alespoň jeden dokument.' });
   }
+
+  // Re-autentizace (heslo účtu NEBO jednorázový kód na e-mail účtu)
+  let authMethod = null;
+  let authNote = '';
+  if (m.password_hash && password) {
+    if (!Pwd.verify(String(password), m.password_hash)) {
+      return res.status(401).json({ error: 'NEPLATNE_HESLO', message: 'Heslo není správné. Dokumenty nebyly potvrzeny.' });
+    }
+    authMethod = 'password';
+    authNote = 'Potvrzení ověřeno opakovaným zadáním hesla účtu.';
+  } else if (code) {
+    const v = await X.ConsentCodes.verify(m.id, String(code).trim(), { purpose: 'consent' });
+    if (!v.ok) {
+      const msg = ({
+        KOD_EXPIROVAL: 'Ověřovací kód vypršel — vyžádejte nový.',
+        KOD_NESOUHLASI: 'Ověřovací kód není správný.',
+        PRILIS_POKUSU: 'Příliš mnoho pokusů — vyžádejte nový kód.',
+        KOD_NEEXISTUJE: 'Ověřovací kód nebyl vyžádán — nechte si jej poslat na e-mail.',
+        CHYBI_KOD: 'Zadejte ověřovací kód.',
+      })[v.reason] || 'Ověřovací kód se nepodařilo ověřit.';
+      return res.status(401).json({ error: v.reason, message: msg });
+    }
+    authMethod = 'email_code';
+    authNote = `Potvrzení ověřeno jednorázovým kódem zaslaným na e-mail účtu (${m.email}).`;
+  } else {
+    return res.status(401).json({
+      error: 'POTREBA_OVERENI',
+      message: m.password_hash
+        ? 'Pro potvrzení dokumentů zadejte své heslo, nebo si nechte poslat ověřovací kód na e-mail — potvrzujete tím, že dokumenty potvrzujete vy osobně.'
+        : 'Pro potvrzení dokumentů si nechte poslat ověřovací kód na svůj e-mail (účet zatím nemá heslo) — potvrzení tak nemůže provést někdo jiný.',
+      passwordSet: !!m.password_hash,
+    });
+  }
+
   const unknown = [];
-  for (const k of docKeys) if (!(await D.DocVersions.latest(k))) unknown.push(k);
+  for (const k of docKeys) {
+    const latest = await D.DocVersions.latest(k);
+    if (!latest || latest.status === 'retired') unknown.push(k);
+  }
   if (unknown.length) return res.status(400).json({ error: 'VALIDACE', message: `Neznámý dokument: ${unknown.join(', ')}` });
 
   const ip = A.clientIp(req);
@@ -676,6 +916,7 @@ router.post('/consent', A.requireMember, asyncRoute(async (req, res) => {
     created.push(await D.Consents.create({
       memberId: m.id, docKey: key, docVersion: doc.version, contentHash: doc.content_hash,
       signerType: 'member', identity: m.email, ip, userAgent: ua,
+      authMethod, authNote,
     }));
   }
 
@@ -687,12 +928,20 @@ router.post('/consent', A.requireMember, asyncRoute(async (req, res) => {
     else status = 'payment_pending';
     if (m.status === 'registered') await D.Members.update(m.id, { status });
   }
+  // Připravenost ke skoku se sděluje i tady: potvrzené dokumenty samy nestačí —
+  // chybí k nim praktická instruktáž a podmínky provozního dne.
+  const prepared = await R.readiness(m);
   res.json({
     ok: true,
     recorded: created.map((c) => ({ id: c.id, docKey: c.doc_key, version: c.doc_version, grantedAt: c.granted_at })),
     status,
     missingConsents: missingMember,
     guardianStatus: m.guardian_status,
+    // výslovné rozlišení, aby text v UI netvrdil, že je účastník „hotový“
+    documentsConfirmed: prepared ? prepared.statements.documentsConfirmed : false,
+    instructionCompleted: prepared ? prepared.statements.instructionCompleted : false,
+    entryAllowed: prepared ? prepared.statements.entryAllowed : false,
+    blocking: prepared ? prepared.blocking.map((b) => ({ key: b.key, label: b.label, message: b.message })) : [],
   });
 }));
 
@@ -771,12 +1020,19 @@ router.get('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => {
     return res.status(404).json({ error: 'NEPLATNY_ODKAZ', message: 'Odkaz je neplatný, vypršel nebo už byl použit.' });
   }
   const all = await D.DocVersions.latestAll();
-  const docs = all.map((d) => ({
-    docKey: d.doc_key, version: d.version, title: d.title, content: d.content, contentHash: d.content_hash,
-  }));
+  const docs = all
+    // Vyřazené (historické) dokumenty se rodiči neposílají k potvrzení.
+    .filter((d) => (d.status || 'active') !== 'retired')
+    .map((d) => ({
+      docKey: d.doc_key, version: d.version, title: d.title, content: d.content, contentHash: d.content_hash,
+    }));
   res.json({
     member: { firstName: m.first_name, lastName: m.last_name, birthDate: m.birth_date, membershipType: m.membership_type },
     guardian: { name: m.guardian_name, relation: m.guardian_relation, email: m.guardian_email },
+    // Co rodič podepisuje: SAMOSTATNÝ souhlas s účastí nezletilého (oddělený od
+    // potvrzení, které činí sám nezletilý). V žádném textu se nevzdává práv dítěte.
+    documents: ['guardian_souhlas'],
+    verificationNote: 'Elektronický odkaz ověřuje jen přístup k e-mailové schránce. Vazbu k dítěti ověří dozor při první účasti podle dokladu a zaznamená ji.',
     docs,
   });
 }));
@@ -792,8 +1048,19 @@ router.post('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => 
   if (!name || !relation || !validators().isEmail(email)) {
     return res.status(400).json({ error: 'VALIDACE', message: 'Jméno, vztah a e-mail zákonného zástupce jsou povinné.' });
   }
+  // Výslovné prohlášení, že osoba je zákonným zástupcem dítěte — bez něj
+  // nelze souhlas s účastí nezletilého zaznamenat.
+  if (b.declareGuardian !== true) {
+    return res.status(400).json({
+      error: 'CHYBI_PROHLASENI',
+      message: 'Potvrďte prosím prohlášení, že jste zákonným zástupcem uvedeného nezletilého.',
+    });
+  }
   const unknown = [];
-  for (const k of docKeys) if (!(await D.DocVersions.latest(k))) unknown.push(k);
+  for (const k of docKeys) {
+    const latest = await D.DocVersions.latest(k);
+    if (!latest || latest.status === 'retired') unknown.push(k);
+  }
   if (unknown.length) return res.status(400).json({ error: 'VALIDACE', message: `Neznámý dokument: ${unknown.join(', ')}` });
 
   const ip = A.clientIp(req);
@@ -804,9 +1071,14 @@ router.post('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => 
     created.push(await D.Consents.create({
       memberId: m.id, docKey: key, docVersion: doc.version, contentHash: doc.content_hash,
       signerType: 'guardian', identity: email, ip, userAgent: ua,
+      authMethod: 'guardian_email',
+      authNote: 'Souhlas udělen přes jednorázový odkaz zaslaný na e-mail zákonného zástupce; vztah k dítěti ověřuje dozor na místě.',
     }));
   }
 
+  // KDO souhlas udělil (jméno, vztah, e-mail) + JAK byla vazba k dítěti ověřena:
+  // elektronicky lze ověřit jen kontrolu e-mailové schránky → 'email_odkaz';
+  // ověření vztahu (rodný list / doklad) zapisuje dozor a přepíše tento údaj.
   await D.Members.update(m.id, {
     guardian_name: name,
     guardian_relation: relation,
@@ -815,6 +1087,8 @@ router.post('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => 
     guardian_status: 'granted',
     guardian_granted_at: D.now(),
     guardian_ip: ip,
+    guardian_verified_method: 'email_odkaz',
+    guardian_verified_note: 'Souhlas udělen přes e-mailový odkaz. Vazba k dítěti tím není ověřena — ověřuje dozor podle dokladu při první účasti.',
   });
 
   const updated = await D.Members.getById(m.id);
@@ -827,6 +1101,11 @@ router.post('/guardian/:token', guardianLimiter, asyncRoute(async (req, res) => 
     ok: true,
     recorded: created.map((c) => ({ id: c.id, docKey: c.doc_key, version: c.doc_version, grantedAt: c.granted_at })),
     status,
+    verification: {
+      method: 'email_odkaz',
+      relationVerified: false,
+      note: 'Vazba k dítěti zatím není ověřená. Ověří ji dozor při první účasti podle dokladu (rodný list / doklad totožnosti).',
+    },
   });
 }));
 
@@ -921,7 +1200,13 @@ router.post('/payments', A.requireMember, asyncRoute(async (req, res) => {
 
   if (purpose === 'prispevek') {
     // Server-side autorizace členství (spec §5,7,18)
-    const el = await E.membershipEligibility(m);
+    // Členství vyžaduje i dokumenty ČLENSTVÍ (stanovy) — kdo se registruje jen
+    // kvůli jednorázovému vstupu (intent='vstup'), je při platbě členství musí
+    // nejprve potvrdit. Opačně to neplatí: vstup členství nevyžaduje.
+    const mForMembership = m.intent === 'clenstvi'
+      ? m
+      : { ...m, intent: 'clenstvi' };
+    const el = await E.membershipEligibility(mForMembership);
     if (el.state.isMember) {
       return res.status(409).json({ error: 'UZ_AKTIVNI', message: 'Členství je už aktivní — příspěvek je uhrazen.' });
     }
@@ -1156,6 +1441,10 @@ router.get('/card', A.requireMember, asyncRoute(async (req, res) => {
 }));
 
 // Kontrola přístupu dozorem (načtení QR karty)
+// POZOR: platné členství ani zakoupený vstup NESTAČÍ. Vstup je povolen jen při
+// splnění všech podmínek provozního řádu (čl. 3): potvrzené dokumenty v aktuální
+// verzi, absolvovaná praktická instruktáž, u nezletilého souhlas zástupce
+// s ověřenou vazbou, vyhovující denní kontrola a otevřený provoz pro daný den.
 router.post('/check-card', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
   const payload = ((req.body || {}).qrPayload || '').trim();
   const card = await D.Cards.getByPayload(payload);
@@ -1165,12 +1454,11 @@ router.post('/check-card', A.requireRole('dozor', 'vybor', 'superadmin'), asyncR
   const st = effectiveStatus(m);
   const member = await isClubMember(m);
   const entitlement = await D.Entitlements.hasActive(m.id);
-  const ok = member || entitlement;
-  const msg = member
-    ? 'Členství aktivní — vstup povolen.'
-    : entitlement
-      ? 'Aktivní jednorázový vstup — vstup povolen.'
-      : st === 'expired' ? 'Členství vypršelo — vstup zamítnut.' : 'Žádné platné členství ani vstup — zamítnuto.';
+  const ready = await R.readiness(m);
+  const ok = !!(ready && ready.ready);
+  const msg = ok
+    ? 'Všechny podmínky vstupu jsou splněny — vstup povolen.'
+    : `Vstup zatím není možný: ${ready ? ready.blocking.map((b) => b.message || b.label).join(' ').trim() : 'stav se nepodařilo vyhodnotit.'}`;
   res.json({
     ok,
     memberName: `${m.first_name} ${m.last_name}`,
@@ -1181,6 +1469,11 @@ router.post('/check-card', A.requireRole('dozor', 'vybor', 'superadmin'), asyncR
     validUntil: m.valid_until,
     accessReason: member ? 'membership' : entitlement ? 'entitlement' : 'none',
     message: msg,
+    // Tři ODDĚLENÉ skutečnosti (nesmějí se slévat):
+    documentsConfirmed: ready ? ready.statements.documentsConfirmed : false,
+    instructionCompleted: ready ? ready.statements.instructionCompleted : false,
+    entryAllowed: ok,
+    blocking: ready ? ready.blocking.map((b) => ({ key: b.key, label: b.label, message: b.message })) : [],
   });
 }));
 

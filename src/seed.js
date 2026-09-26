@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const D = require('./db');
+const X = require('./db-app');
 
 // Kvalifikace názvů tabulek: postgres → `app.<tabulka>`, sqlite → beze schématu.
 // (Seed SQL je sdílený pro oba drivery; v Postgresu musí mířit do schématu `app`,
@@ -90,10 +91,19 @@ async function seedDocs() {
     { key: 'provozni_rad', file: 'provozni_rad.md', title: 'Provozní řád dopadové matrace' },
     { key: 'cestne_prohlaseni', file: 'cestne_prohlaseni.md', title: 'Čestné prohlášení o zdravotní způsobilosti' },
     { key: 'gdpr', file: 'gdpr.md', title: 'Souhlas se zpracováním osobních údajů (GDPR)' },
-    { key: 'vzdani_prava', file: 'vzdani_prava.md', title: 'Vzdání se práva na náhradu újmy (§ 2925 OZ)' },
+    // POUČENÍ O RIZICÍCH (2026-09-28) nahrazuje původní „Vzdání se práva na
+    // náhradu újmy (§ 2925 OZ)“. Vzdání se práva na náhradu újmy bylo z aplikace
+    // ODSTRANĚNO — nový dokument nic takového neobsahuje a výslovně uvádí, že
+    // potvrzení neomezuje zákonná práva účastníka při vzniku újmy.
+    { key: 'pouceni_rizika', file: 'pouceni_rizika.md', title: 'Poučení o rizicích a potvrzení pravidel účasti' },
+    // Obsah PRAKTICKÉ INSTRUKTÁŽE (verzovaný) — záznam o instruktáži se váže
+    // na konkrétní verzi: nová verze = nutná nová instruktáž.
+    { key: 'instruktaz_airbag', file: 'instruktaz_airbag.md', title: 'Instruktáž před použitím dopadové matrace' },
     // Dokumenty k ČLENSTVÍ (konfigurovatelné administrátorem — reálné znění viz soubory)
     { key: 'stanovy', file: 'membership_stanovy.md', title: 'Stanovy TJ Krupka, z.s. (členství)' },
-    { key: 'guardian_souhlas', file: 'guardian_souhlas.md', title: 'Souhlas zákonného zástupce' },
+    // SAMOSTATNÝ souhlas zákonného zástupce S ÚČASTÍ nezletilého (oddělený od
+    // potvrzení, které činí sám nezletilý účastník) — bez vzdání se práv dítěte.
+    { key: 'guardian_souhlas', file: 'guardian_souhlas.md', title: 'Souhlas zákonného zástupce s účastí nezletilého' },
   ];
   for (const doc of docs) {
     const content = fs.readFileSync(path.join(docsDir, doc.file), 'utf8');
@@ -106,6 +116,24 @@ async function seedDocs() {
       await D.DocVersions.create(doc.key, v, doc.title, content, D.now());
     }
   }
+
+  // ---- HISTORICKÉ DOKUMENTY (beze změny textu i verzí) --------------------
+  // „Vzdání se práva na náhradu újmy (§ 2925 OZ)“ se NEMAŽE ani nepřepisuje:
+  // zůstává v doc_versions i ve všech souhlasech jako doklad o dřívějším znění.
+  // Jen se označí jako vyřazený (`status = retired`), aby se z něj nestala
+  // povinnost pro nové účastníky a aby bylo dohledatelné, čím byl nahrazen.
+  const superseded = await D.DocVersions.latest('vzdani_prava');
+  if (superseded && superseded.status !== 'retired') {
+    await X.DocLifecycle.retire('vzdani_prava', {
+      supersededBy: 'pouceni_rizika',
+      note: 'Vyřazeno 2026-09-28: vzdání se práva na náhradu újmy odstraněno; nahrazeno dokumentem „Poučení o rizicích a potvrzení pravidel účasti“. Historické znění a souhlasy zůstávají v auditní stopě.',
+    });
+  }
+
+  // ---- PARAMETRY PROVOZU ČEKAJÍCÍ NA POTVRZENÍ ---------------------------
+  // Dokud nejsou doložené (výrobce / posouzení místa), aplikace je zobrazuje
+  // jako „čeká na doplnění“ a NIKDE nepoužívá odhadnuté hodnoty.
+  await X.OpParameters.ensureSeeded();
 }
 
 async function seedDemoMembers() {
@@ -164,7 +192,10 @@ async function seedFacilities() {
       code: 'airbag',
       name: 'Dopadová matrace',
       shortName: 'Airbag',
-      description: 'Nafukovací matrace 2 × 5 × 10 m pro nácvik skoků na horském kole. Určena především pro členy spolku.',
+      // Provoz počítá s ČLENY I NEČLENY (jednorázový vstup) — text to musí
+      // odpovídat, jinak by v aplikaci zůstalo „pouze pro členy“ (rozpor
+      // s provozním řádem, čl. 1.2 a 1.3).
+      description: 'Nafukovací matrace 2 × 5 × 10 m pro nácvik skoků na horském kole. Vstup pro členy spolku i pro nečleny s jednorázovým vstupem — za stejných pravidel a vždy za přítomnosti dozoru.',
       icon: 'ticket',
     },
   ];
@@ -173,6 +204,10 @@ async function seedFacilities() {
     ON CONFLICT (code) DO NOTHING`;
   for (const f of FACILITIES) {
     await D.raw.run(upsert, [D.uuid(), f.code, f.name, f.shortName, f.description, f.icon, D.now()]);
+    // Text zařízení se srovnává i u existujícího záznamu (jinak by v aplikaci
+    // zůstal starý popis „určena především pro členy“).
+    await D.raw.run(`UPDATE ${T('facilities')} SET name = ?, short_name = ?, description = ? WHERE code = ?`,
+      [f.name, f.shortName, f.description, f.code]);
   }
   // staré rezervace (bez facility) přiřadíme airbagu
   const airbag = await D.Facilities.getByCode('airbag');
@@ -252,8 +287,15 @@ async function seedProductVariants() {
   // Univerzální varianty: produkt → varianta dle uživatele (audience + věk).
   // Dokumenty jsou KONFIGUROVATELNÉ (klíče doc_keys ukazují na doc_versions;
   // texty se mění v docs/* bez nové verze aplikace — nová verze textu vyvolá nový souhlas).
-  const AIRBAG_SERVICE_DOCS = ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava'];
-  const GUARDIAN_AIRBAG_DOCS = [...AIRBAG_SERVICE_DOCS, 'guardian_souhlas'];
+  //
+  // 2026-09-28: dokument „vzdani_prava“ (vzdání se práva na náhradu újmy) byl
+  // ODSTRANĚN a nahrazen dokumentem „pouceni_rizika“ (Poučení o rizicích a
+  // potvrzení pravidel účasti) — v sadě povinných dokumentů už není.
+  // Zákonný zástupce podepisuje POUZE samostatný souhlas s účastí nezletilého;
+  // provozní řád, poučení o rizicích a zdravotní prohlášení potvrzuje účastník.
+  const AIRBAG_SERVICE_DOCS = ['provozni_rad', 'pouceni_rizika', 'cestne_prohlaseni', 'gdpr'];
+  const GUARDIAN_AIRBAG_DOCS = ['guardian_souhlas'];
+  // Pravidla platí pro ČLENY I NEČLENY stejně — liší se jen cena (člen 300 / nečlen 600).
   const VARIANTS = [
     { product: 'airbag_day', audience: 'MEMBER', age_type: 'ANY', price_czk: 300, sort: 1, doc_keys: AIRBAG_SERVICE_DOCS, guardian_doc_keys: GUARDIAN_AIRBAG_DOCS },
     { product: 'airbag_day', audience: 'PUBLIC', age_type: 'ANY', price_czk: 600, sort: 2, doc_keys: AIRBAG_SERVICE_DOCS, guardian_doc_keys: GUARDIAN_AIRBAG_DOCS },

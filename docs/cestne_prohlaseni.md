@@ -12,4 +12,4 @@ prohlašuji, že:
 4. beru na vědomí, že zařízení nesmím používat v těhotenství, pod vlivem alkoholu, omamných nebo psychotropních látek, při únavě, nemoci či po požití léků ovlivňujících pozornost,
 5. jsem si vědom/a, že toto prohlášení slouží provozovateli k posouzení mé způsobilosti a že uvedení nepravdivých údajů může mít právní následky.
 
-*Toto čestné prohlášení je dáno elektronicky v rámci členské aplikace Tělovýchovná jednota Krupka; okamžik udělení je opatřen časovým razítkem a zaznamenán v auditní stopě souhlasů.*
+*Toto čestné prohlášení je dáno elektronicky v rámci členské aplikace Tělovýchovná jednota Krupka. Systém ukládá datum a čas serveru, identitu přihlášeného účtu a IP adresu; jde o elektronický záznam v evidenci spolku, nikoli o vlastnoruční podpis ani o kvalifikované elektronické časové razítko.*

@@ -35,4 +35,4 @@ Poskytnutí údajů je dobrovolné, ale bez nich nelze členství založit ani z
 
 Souhlasím se zasíláním informací o činnosti spolku, akcích a nabídkách na e-mail / SMS (tento souhlas lze kdykoli odvolat).
 
-*Tento souhlas je udělen elektronicky v rámci členské aplikace Tělovýchovná jednota Krupka; okamžik udělení je opatřen časovým razítkem a zaznamenán v auditní stopě souhlasů.*
+*Tento souhlas je udělen elektronicky v rámci členské aplikace Tělovýchovná jednota Krupka. Systém ukládá datum a čas serveru, identitu přihlášeného účtu a IP adresu; jde o elektronický záznam v evidenci spolku, nikoli o vlastnoruční podpis ani o kvalifikované elektronické časové razítko.*

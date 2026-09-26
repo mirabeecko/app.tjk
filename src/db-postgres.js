@@ -93,15 +93,18 @@ const Members = {
         (id, member_no, first_name, last_name, birth_date, street, city, zip,
          email, password_hash, phone, membership_type, membership_kind, gender, photo, role, status, guardian_name, guardian_relation,
          guardian_email, guardian_phone, guardian_token, guardian_token_expires, guardian_status,
-         valid_from, valid_until, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)`,
+         intent, valid_from, valid_until, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
       [id, data.memberNo ?? null, data.firstName, data.lastName, data.birthDate,
         data.street || '', data.city || '', data.zip || '', data.email, data.passwordHash ?? null, data.phone || '',
         data.membershipType, data.membershipKind || 'sportovni', data.gender ?? null, data.photo ?? null, data.role || 'member', data.status || 'registered',
         data.guardianName ?? null, data.guardianRelation ?? null,
         data.guardianEmail ?? null, data.guardianPhone ?? null,
         data.guardianToken ?? null, data.guardianTokenExpires ?? null,
-        data.guardianStatus || 'not_required', data.validFrom ?? null, data.validUntil ?? null,
+        data.guardianStatus || 'not_required',
+        // intent: clenstvi | vstup — členství není podmínkou vstupu pro nečleny
+        data.intent === 'vstup' ? 'vstup' : 'clenstvi',
+        data.validFrom ?? null, data.validUntil ?? null,
         ts, ts]
     );
     return this.getById(id);
@@ -193,20 +196,23 @@ const DocVersions = {
 
 // ---------- consents (audit trail) ----------
 const Consents = {
-  async create({ memberId, docKey, docVersion, contentHash, signerType, identity, ip, userAgent }) {
+  async create({ memberId, docKey, docVersion, contentHash, signerType, identity, ip, userAgent, authMethod, authNote }) {
     const id = uuid();
     // NOVÁ VERZE dokumentu => souhlas se upsertuje (audit ukazuje aktuální verzi)
     await raw.run(
-      `INSERT INTO ${T('consents')} (id, member_id, doc_key, doc_version, content_hash, signer_type, identity, granted_at, ip, user_agent)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$8,$9)
+      `INSERT INTO ${T('consents')} (id, member_id, doc_key, doc_version, content_hash, signer_type, identity, granted_at, ip, user_agent, auth_method, auth_note)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$8,$9,$10,$11)
        ON CONFLICT (member_id, doc_key, signer_type) DO UPDATE SET
          doc_version = EXCLUDED.doc_version,
          content_hash = EXCLUDED.content_hash,
          identity = EXCLUDED.identity,
          granted_at = now(),
          ip = EXCLUDED.ip,
-         user_agent = EXCLUDED.user_agent`,
-      [id, memberId, docKey, docVersion, contentHash, signerType, identity, ip, userAgent]
+         user_agent = EXCLUDED.user_agent,
+         auth_method = EXCLUDED.auth_method,
+         auth_note = EXCLUDED.auth_note`,
+      [id, memberId, docKey, docVersion, contentHash, signerType, identity, ip, userAgent,
+        authMethod || 'session', authNote || '']
     );
     const row = await raw.get(
       `SELECT * FROM ${T('consents')} WHERE member_id = $1 AND doc_key = $2 AND signer_type = $3`,

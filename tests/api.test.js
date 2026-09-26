@@ -22,6 +22,9 @@ function signWebhookEvent(payload) {
 }
 
 const BASE = process.env.TEST_BASE || 'http://localhost:4310';
+// Heslo testovacích účtů — potvrzení dokumentů vyžaduje opakované zadání hesla
+const ADULT_PASS = 'test-heslo-123';
+const MINOR_PASS = 'test-heslo-456';
 let serverProc = null;
 let results = [];
 let failures = 0;
@@ -108,6 +111,44 @@ async function loginAs(email) {
   await api('POST', `/api/login/${tok}`);
 }
 
+/**
+ * Potvrzení dokumentů s ověřením identity účastníka.
+ * Účet s heslem → heslo; účet bez hesla → jednorázový kód z e-mailu (outbox).
+ * Server bez ověření potvrzení odmítne — to je právě opatření proti tomu,
+ * aby pravidla odklikl za jiného někdo další.
+ */
+async function consentWithVerification(docKeys, { password } = {}) {
+  if (password) return api('POST', '/api/consent', { docKeys, password });
+  const current = await api('GET', '/api/me');
+  const email = current && current.member && current.member.email;
+  const req = await api('POST', '/api/consent-code');
+  if (!req.sent) return { error: 'KOD_NEBYL_ODESLAN', detail: req };
+  const ob = await api('GET', '/api/outbox');
+  // Kód patří KONKRÉTNÍMU účtu — hledáme podle příjemce, ne „poslední kód v outboxu“.
+  const mail = ob.messages
+    .find((m) => m.to === email && m.subject && m.subject.includes('Ověřovací kód'));
+  const code = mail && (mail.body.match(/\b(\d{6})\b/) || [])[1];
+  return api('POST', '/api/consent', { docKeys, code });
+}
+
+/** Přihlášení účtu dozoru přes magic link (opakovaně použitelné). */
+async function loginDozorMagic() {
+  await api('POST', '/api/login', { email: 'dozor@airbag.test' });
+  const ob = await api('GET', '/api/outbox');
+  const mail = ob.messages.find((m) => m.to === 'dozor@airbag.test' && m.subject.includes('přihlášení'));
+  const tok = mail && (mail.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
+  return api('POST', `/api/login/${tok}`);
+}
+
+/** Přihlášení člena přes magic link (opakovaně použitelné). */
+async function reloginAdultMagic(email) {
+  await api('POST', '/api/login', { email });
+  const ob = await api('GET', '/api/outbox');
+  const mail = ob.messages.find((m) => m.to === email && m.subject.includes('přihlášení'));
+  const tok = mail && (mail.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
+  return api('POST', `/api/login/${tok}`);
+}
+
 async function main() {
   // ---------- TOK A: dospělý člen ----------
   console.log('\n=== TOK A: registrace → souhlas → platba → QR karta (dospělý) ===\n');
@@ -125,19 +166,61 @@ async function main() {
   // dokumenty = členství (stanovy, gdpr) + služba airbag (4) — unie dle stavu
   check('Chybí dokumenty (členství + služba)', me.missingConsents.length === 5 && me.missingConsents.includes('stanovy') && me.missingConsents.includes('provozni_rad'), me.missingConsents.join(','));
 
+  // Vyřazený dokument (vzdání se práva na náhradu újmy) se už nevyžaduje,
+  // ale zůstává v systému kvůli starším souhlasům.
+  const docsPublic = await api('GET', '/api/docs?includeRetired=1&slim=1');
+  check('Vyřazený dokument „vzdání se práva“ je označen jako retired a je uvedeno čím byl nahrazen',
+    docsPublic.docs.some((d) => d.docKey === 'vzdani_prava' && d.status === 'retired' && d.supersededBy === 'pouceni_rizika'));
+  check('Nový dokument „Poučení o rizicích“ je aktivní',
+    docsPublic.docs.some((d) => d.docKey === 'pouceni_rizika' && d.status === 'active'));
+  check('Vyřazený dokument se běžně nezobrazuje jako povinná podmínka',
+    !(await api('GET', '/api/docs?slim=1')).docs.some((d) => d.docKey === 'vzdani_prava'));
+  // Původní znění (i s § 2925) zůstává v evidenci kvůli starším souhlasům…
+  const vzFull = (await api('GET', '/api/docs?includeRetired=1')).docs.find((d) => d.docKey === 'vzdani_prava');
+  check('Historické znění vzdání se práva zůstává beze změny (audit)',
+    !!vzFull && /§ 2925/.test(vzFull.content || ''));
+  // …ale NOVÉ znění už žádné vzdání se práva neobsahuje
+  const pouceniFull = (await api('GET', '/api/docs')).docs.find((d) => d.docKey === 'pouceni_rizika');
+  check('Poučení o rizicích neobsahuje vzdání se práva ani odkaz na § 2925',
+    !!pouceniFull && !/§ *2925/.test(pouceniFull.content || '')
+      && !/vzdávám se práva na náhradu újmy/i.test(pouceniFull.content || ''));
+  check('Poučení o rizicích výslovně uvádí, že potvrzení neomezuje zákonná práva účastníka',
+    !!pouceniFull && /neomezuje zákonná práva účastníka/i.test(pouceniFull.content || ''));
+  check('Poučení o rizicích obsahuje poučení o riziku úrazu hlavy, páteře a končetin',
+    !!pouceniFull && /poranění hlavy/i.test(pouceniFull.content || '')
+      && /poranění páteře/i.test(pouceniFull.content || '')
+      && /poranění končetin/i.test(pouceniFull.content || ''));
+
+  // POTVRZENÍ DOKUMENTŮ BEZ HESLA NELZE (aby je nepotvrdil někdo jiný)
+  const consentNoPass = await api('POST', '/api/consent', { docKeys: ['gdpr'] });
+  check('Souhlas bez ověření (bez hesla i kódu) → zamítnuto',
+    ['POTREBA_OVERENI', 'POTREBA_HESLO', 'CHYBI_HESLO'].includes(consentNoPass.error), JSON.stringify(consentNoPass.error));
+  const badCode = await api('POST', '/api/consent', { docKeys: ['gdpr'], code: '000000' });
+  check('Souhlas s neplatným ověřovacím kódem → zamítnuto',
+    ['KOD_NESOUHLASI', 'KOD_NEEXISTUJE'].includes(badCode.error), JSON.stringify(badCode.error));
+
   // platba bez souhlasu musí selhat (nelze obejít)
   const payEarly = await api('POST', '/api/payments', { purpose: 'prispevek' });
   check('Platba bez souhlasu → 409 CHYBI_DOKUMENTY', payEarly.error === 'CHYBI_DOKUMENTY', JSON.stringify(payEarly.error));
 
+  // nastavení hesla (nutné pro potvrzení dokumentů)
+  const setPass = await api('POST', '/api/set-password', { password: ADULT_PASS });
+  check('Nastavení hesla účtu', setPass.ok === true);
+
+  const badPass = await api('POST', '/api/consent', { docKeys: ['gdpr'], password: 'spatne-heslo' });
+  check('Souhlas se špatným heslem → zamítnuto', badPass.error === 'NEPLATNE_HESLO', JSON.stringify(badPass.error));
+
   // podepsání jen části dokumentů
-  const partial = await api('POST', '/api/consent', { docKeys: ['gdpr'] });
+  const partial = await api('POST', '/api/consent', { docKeys: ['gdpr'], password: ADULT_PASS });
   check('Částečný souhlas OK', partial.ok === true);
   me = await api('GET', '/api/me');
   check('Po částečném souhlasu chybí 4', me.missingConsents.length === 4);
 
-  // úplný souhlas (členství + služba)
-  const consent = await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'vzdani_prava', 'stanovy'] });
+  // úplný souhlas (členství + služba) — bez vzdání se práva, s poučením o rizicích
+  const consent = await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'pouceni_rizika', 'stanovy'], password: ADULT_PASS });
   check('Plný souhlas OK', consent.ok === true && consent.recorded.length === 4);
+  check('Potvrzení dokumentů NENÍ totéž co připravenost ke skoku',
+    consent.documentsConfirmed === true && consent.instructionCompleted === false && consent.entryAllowed === false);
   me = await api('GET', '/api/me');
   check('Stav: payment_pending', me.status === 'payment_pending');
   check('Audit trail: 5 záznamů s IP+časem+hashem', me.consents.length === 5 && me.consents.every((c) => c.ip && c.grantedAt && c.contentHash));
@@ -147,10 +230,18 @@ async function main() {
   check('Doklad o podpisu: 5 souhlasů', !!(signed && signed.consents && signed.consents.length === 5), signed && signed.consents && signed.consents.length);
   check('Doklad: ke každému souhlasu PŘESNÉ znění + otisk ověřen', !!(signed && signed.consents.every((c) => c.text && c.contentHash && c.integrity === 'OK')));
   check('Doklad: lidský název dokumentu (ne klíč)', !!(signed && signed.consents.some((c) => c.title === 'Provozní řád dopadové matrace')));
-  check('Doklad: číslo protokolu + otisk balíku', !!(signed && /^TJK-SOUHLAS-\d{8}-/.test(signed.protocolNo) && signed.fingerprint.length === 64), signed && signed.protocolNo);
+  check('Doklad: číslo protokolu + otisk balíku', !!(signed && /^TJK-EVIDENCE-\d{8}-/.test(signed.protocolNo) && signed.fingerprint.length === 64), signed && signed.protocolNo);
   const prot = await apiText(`/api/documents/protocol/${adultId}`);
-  check('Protokol (HTML) se vydá', prot.status === 200 && prot.text.includes('Protokol o elektronickém souhlasu'));
-  check('Protokol: obsahuje otisk podepsaného znění i podpisový blok', prot.text.includes(signed.consents[0].contentHash) && prot.text.includes('Člen — jméno, příjmení a podpis'));
+  check('Protokol (HTML) se vydá', prot.status === 200 && prot.text.includes('Protokol o potvrzení dokumentů a průběhu účasti'));
+  check('Protokol: odděluje „dokument potvrzen“, „instruktáž absolvována“ a „vstup povolen“',
+    prot.text.includes('Dokument potvrzen') && prot.text.includes('Instruktáž absolvována') && prot.text.includes('Vstup / provoz povolen'));
+  check('Protokol: obsahuje otisk potvrzeného znění', prot.text.includes(signed.consents[0].contentHash));
+  check('Protokol: NEvytváří dojem vlastnoručního podpisu ani časového razítka',
+    !prot.text.includes('jméno, příjmení a podpis') && !prot.text.includes('sign-line')
+      && prot.text.includes('Neobsahuje vlastnoruční podpis') && prot.text.includes('kvalifikované elektronické časové razítko'));
+  check('Protokol: uvádí, že potvrzení neomezuje zákonná práva účastníka',
+    prot.text.includes('neomezuje zákonná práva účastníka'));
+  check('Protokol: uvádí způsob ověření potvrzení (heslo)', prot.text.includes('opakované zadání hesla účtu'));
   const evForbidden = await api('GET', '/api/documents/verify', undefined, { raw: true });
   check('Kontrola integrity: běžný člen → 403', evForbidden.status === 403, String(evForbidden.status));
   check('Audit trail: signer=member', me.consents.every((c) => c.signerType === 'member'));
@@ -211,12 +302,31 @@ async function main() {
   jar['airbag_session'] = 'none'; // odhlášení
   const gInfo = await api('GET', `/api/guardian/${token}`);
   check('Rodičovský odkaz: data dítěte', gInfo.member && gInfo.member.firstName === 'Test' && gInfo.docs.length >= 6);
+  check('Rodič podepisuje POUZE samostatný souhlas s účastí (ne dokumenty dítěte)',
+    Array.isArray(gInfo.documents) && gInfo.documents.length === 1 && gInfo.documents[0] === 'guardian_souhlas');
+  check('Rodičovská stránka uvádí, že vazba k dítěti není e-mailem ověřena',
+    (gInfo.verificationNote || '').includes('ověří dozor'));
+
+  // bez výslovného prohlášení o zákonném zastoupení souhlas uložit nelze
+  const gNoDeclare = await api('POST', `/api/guardian/${token}`, {
+    name: 'Rodic Test', relation: 'matka', email: `rodic${Date.now()}@test.cz`,
+    docKeys: ['guardian_souhlas'],
+  });
+  check('Souhlas rodiče bez prohlášení o zastoupení → zamítnuto', gNoDeclare.error === 'CHYBI_PROHLASENI', JSON.stringify(gNoDeclare.error));
 
   const gConsent = await api('POST', `/api/guardian/${token}`, {
     name: 'Rodic Test', relation: 'matka', email: `rodic${Date.now()}@test.cz`,
-    docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy', 'guardian_souhlas'],
+    docKeys: ['guardian_souhlas'], declareGuardian: true,
   });
-  check('Souhlas rodiče zaznamenán', gConsent.ok === true && gConsent.recorded.length === 6);
+  check('Souhlas rodiče zaznamenán (1 dokument)', gConsent.ok === true && gConsent.recorded.length === 1);
+  check('Souhlas rodiče: vazba k dítěti zatím NEOVĚŘENA', gConsent.verification && gConsent.verification.relationVerified === false);
+  const gText = await api('GET', `/api/docs?slim=1`);
+  check('Text souhlasu zástupce neobsahuje vzdání se práv dítěte',
+    await (async () => {
+      const full = (await api('GET', '/api/docs')).docs.find((d) => d.docKey === 'guardian_souhlas');
+      return full && !/vzdávám se práva na náhradu újmy|2925/i.test(full.content)
+        && /nevzdávám žádného práva nezletilého/i.test(full.content);
+    })());
 
   // rodičovský odkaz už nejde použít 2×
   const gAgain = await api('POST', `/api/guardian/${token}`, {
@@ -235,11 +345,19 @@ async function main() {
   const exch = await api('POST', `/api/login/${loginToken}`);
   check('Přihlášení přes odkaz OK', exch.ok === true && exch.member.id === minorId);
 
-  const cMinor = await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy'] });
+  // Nezletilý potvrzuje SVOJE dokumenty sám (samostatně od souhlasu rodiče)
+  await api('POST', '/api/set-password', { password: MINOR_PASS });
+  const cMinor = await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'pouceni_rizika', 'stanovy'], password: MINOR_PASS });
   check('Souhlasy mladistvého OK', cMinor.ok === true);
   me = await api('GET', '/api/me');
   check('Stav mladistvého: payment_pending', me.status === 'payment_pending');
-  check('Guardian souhlas vidět v /me', me.guardianStatus === 'granted' && me.consents.filter((c) => c.signerType === 'guardian').length === 6);
+  check('Souhlas rodiče je v evidenci oddělený od potvrzení účastníka',
+    me.guardianStatus === 'granted'
+      && me.consents.filter((c) => c.signerType === 'guardian').length === 1
+      && me.consents.filter((c) => c.signerType === 'guardian')[0].docKey === 'guardian_souhlas'
+      && me.consents.filter((c) => c.signerType === 'member').length === 5);
+  check('Souhlas rodiče má zaznamenaný způsob ověření (e-mailový odkaz)',
+    me.consents.filter((c) => c.signerType === 'guardian')[0].authMethod === 'guardian_email');
 
   const intentMinor = await api('POST', '/api/payments', { purpose: 'prispevek' });
   const confirmMinor = await api('POST', `/api/payments/${intentMinor.paymentId}/confirm`);
@@ -264,12 +382,77 @@ async function main() {
   const detailForbiddenDozor = await api('GET', `/api/admin/members/${adultId}`);
   check('Dozor NEMÁ přístup k detailu člena (403, jen admin)', detailForbiddenDozor.error === 'NEDOSTATECNA_PRAVA');
 
-  // kontrola QR karty dozorem (provozní nutnost — zůstává povolena)
+  // ---- NOVÉ: vstup je vázán na denní kontrolu, instruktáž a totožnost ----
+  // (provozní den může existovat z dřívějšího běhu — proto den nejdřív ukončíme,
+  //  test tak nezávisí na stavu databáze mezi běhy)
+  await api('POST', '/api/dozor/provozni-den/ukonceni', { note: 'Test: ukončení před dalším během' });
+  const qrNoDay = await api('POST', '/api/check-card', { qrPayload: card.qrPayload });
+  check('Bez otevřeného (neukončeného) provozního dne → vstup zamítnut', qrNoDay.ok === false
+    && qrNoDay.blocking.some((b) => b.key === 'day'), qrNoDay.message);
+
+  // denní kontrola s ZÁVADOU → provoz nezahájen
+  const dayFail = await api('POST', '/api/dozor/provozni-den', {
+    mattress: 'ok', pressure: 'ok', anchoring: 'zavada', ramp: 'ok', surroundings: 'ok',
+    defects: 'Povolené kotvení', dozorPresent: true,
+  });
+  check('Denní kontrola se závadou → provoz NEOTEVEŘEN', dayFail.verdict === 'nevyhovuje' && dayFail.entryAllowed === false, dayFail.verdict);
+  const qrBadDay = await api('POST', '/api/check-card', { qrPayload: card.qrPayload });
+  check('Kontrola nevyhovuje → vstup zamítnut', qrBadDay.ok === false, qrBadDay.message);
+
+  // vyhovující kontrola → provoz otevřen
+  const dayOk = await api('POST', '/api/dozor/provozni-den', {
+    mattress: 'ok', pressure: 'ok', anchoring: 'ok', ramp: 'ok', surroundings: 'ok',
+    checkNote: 'Vše v pořádku', dozorPresent: true,
+  });
+  check('Vyhovující denní kontrola → provoz otevřen', dayOk.verdict === 'vyhovuje' && dayOk.entryAllowed === true, dayOk.message);
+
+  // kontrola sice vyhovuje, ale chybí praktická instruktáž
+  const qrNoInstruction = await api('POST', '/api/check-card', { qrPayload: card.qrPayload });
+  check('Potvrzené dokumenty + kontrola nestačí → chybí instruktáž', qrNoInstruction.ok === false
+    && qrNoInstruction.blocking.some((b) => b.key === 'instruction'), qrNoInstruction.message);
+  check('Stavové rozlišení v odpovědi: dokumenty ANO / instruktáž NE / vstup NE',
+    qrNoInstruction.documentsConfirmed === true && qrNoInstruction.instructionCompleted === false && qrNoInstruction.entryAllowed === false);
+
+  // záznam o praktické instruktáži (vytváří dozor AŽ po instruktáži)
+  const instr = await api('POST', '/api/dozor/instruction', {
+    memberId: adultId, result: 'absolvoval', note: 'Nácvik dopadu zvládnut.',
+  });
+  check('Instruktáž zaznamenána dozorem (verze + identita)', instr.ok === true
+    && instr.instruction.docVersion >= 1 && !!instr.instruction.dozor && instr.instruction.result === 'absolvoval');
+  check('Po instruktáži je splněna i podmínka vstupu', instr.entryAllowed === true, JSON.stringify(instr.blocking));
+
   const qrCheck = await api('POST', '/api/check-card', { qrPayload: card.qrPayload });
-  check('Kontrola QR: vstup povolen', qrCheck.ok === true && qrCheck.status === 'active', qrCheck.message);
+  check('Kontrola QR: všechny podmínky splněny → vstup povolen', qrCheck.ok === true && qrCheck.status === 'active', qrCheck.message);
 
   const badQr = await api('POST', '/api/check-card', { qrPayload: 'TJK:999:fake' });
   check('Kontrola falešné karty → zamítnuto', badQr.error === 'NEPLATNA_KARTA');
+
+  // přerušení provozu blokuje vstup (a obnovení ho opět povolí)
+  await api('POST', '/api/dozor/provozni-den/preruseni', { action: 'interrupt', reason: 'Mokrý povrch matrace' });
+  const qrInterrupted = await api('POST', '/api/check-card', { qrPayload: card.qrPayload });
+  check('Přerušený provoz → vstup zamítnut', qrInterrupted.ok === false, qrInterrupted.message);
+  await api('POST', '/api/dozor/provozni-den/preruseni', { action: 'resume', note: 'Povrch oschnut' });
+  const qrResumed = await api('POST', '/api/check-card', { qrPayload: card.qrPayload });
+  check('Obnovený provoz → vstup povolen', qrResumed.ok === true);
+
+  // vstup se eviduje i s podmínkami, za kterých byl povolen
+  const lookup = await api('POST', '/api/dozor/lookup', { qrPayload: card.qrPayload, note: 'test' });
+  check('Lookup dozora: vstup povolen a zaevidován', lookup.ok === true && !!lookup.entryId);
+  check('Lookup: karta nese oddělené stavy i denní kontrolu',
+    lookup.card.access.documentsConfirmed === true && lookup.card.access.instructionCompleted === true
+      && lookup.card.access.entryAllowed === true && lookup.card.day && lookup.card.day.verdict === 'vyhovuje');
+  check('Lookup: bez PINu je totožnost ověřena jen fotografií (a je to uvedeno)',
+    lookup.card.identityCheck.method === 'qr+foto' && !!lookup.card.identityCheck.note);
+
+  const entriesDay = await api('GET', '/api/dozor/provozni-den');
+  check('Provozní kniha: den otevřen, kontrola vyhovuje, vstupy povoleny', entriesDay.opened === true && entriesDay.entryAllowed === true);
+  check('Provozní kniha: záznamy obsahují kontrolu, otevření i přerušení/obnovení',
+    ['kontrola', 'otevreni', 'preruseni', 'obnoveni', 'instruktaz'].every((t) => entriesDay.records.some((r) => r.type === t)),
+    entriesDay.records.map((r) => r.type).join(','));
+  const book = await api('GET', '/api/dozor/provozni-kniha?days=7');
+  check('Provozní kniha: výpis za období', book.count >= 1 && book.book[0].checks.length === 5);
+  const instrList = await api('GET', `/api/dozor/instructions?memberId=${adultId}`);
+  check('Výpis instruktáží účastníka', instrList.count === 1 && instrList.instructions[0].result === 'absolvoval');
 
   // role guard: běžný člen nesmí do adminu
   const loginAdult = await api('POST', '/api/login', { email: reg.member.email });
@@ -283,11 +466,13 @@ async function main() {
   // ---------- TOK D (bonus): rezervace + merch ----------
   console.log('\n=== TOK D (bonus): rezervace + merch ===\n');
 
-  const bookings = await api('GET', '/api/bookings?date=2026-08-20');
+  // Datum se odvozuje od dneška — jinak by test kolidoval s daty z dřívějších běhů
+  const bkDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const bookings = await api('GET', `/api/bookings?date=${bkDate}`);
   check('Slotů 10 (9:00–19:00)', bookings.slots.length === 10, `${bookings.slots.length} slotů`);
-  const bk = await api('POST', '/api/bookings', { date: '2026-08-20', hour: 10 });
+  const bk = await api('POST', '/api/bookings', { date: bkDate, hour: 10 });
   check('Rezervace 10:00 OK', bk.ok === true);
-  const bkDup = await api('POST', '/api/bookings', { date: '2026-08-20', hour: 10 });
+  const bkDup = await api('POST', '/api/bookings', { date: bkDate, hour: 10 });
   check('Duplicitní rezervace → 409 OBSAZENO', bkDup.error === 'OBSAZENO');
 
   const merch = await api('GET', '/api/merch');
@@ -508,7 +693,7 @@ async function main() {
     photo: TEST_PHOTO,
   });
   check('Webhook: registrace OK', whReg.member && whReg.member.id, whReg.member && whReg.member.id);
-  await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy'] });
+  await consentWithVerification(['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'pouceni_rizika', 'stanovy']);
   const whPay = await api('POST', '/api/payments', { purpose: 'prispevek' });
   check('Webhook: intent vytvořen (test gateway)', !!whPay.paymentId && whPay.gateway === 'test', JSON.stringify(whPay.gateway));
 
@@ -540,11 +725,18 @@ async function main() {
     street: 'X 9', city: 'Krupka', zip: '417 41',
     email: `neclen${Date.now()}@test.cz`, phone: '+420 777 000 009',
     photo: TEST_PHOTO,
+    // ÚČEL = jednorázový vstup: členství (a dokumenty členství) NENÍ podmínkou
+    intent: 'vstup',
   });
   check('Nečlen: registrace OK', !!host.member, host.member && host.member.id);
+  check('Nečlen: registrace s účelem „vstup" (ne členství)', host.intent === 'vstup' && host.member.intent === 'vstup');
   let meN = await api('GET', '/api/me');
   check('Nečlen: role = neclen + bez přístupu', meN.kind === 'neclen' && meN.access === false, JSON.stringify({ kind: meN.kind, access: meN.access }));
-  await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy'] });
+  check('Nečlen NEMUSÍ potvrzovat stanovy (členství není podmínkou vstupu)',
+    !meN.missingConsents.includes('stanovy') && meN.missingConsents.length === 4, meN.missingConsents.join(','));
+  check('Nečlen bez stanov nemůže koupit členství (dokumenty členství chybí)',
+    (await api('POST', '/api/payments', { purpose: 'prispevek' })).error === 'CHYBI_DOKUMENTY');
+  await consentWithVerification(['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'pouceni_rizika']);
   const hIntent = await api('POST', '/api/payments', { purpose: 'produkt', productCode: 'airbag_day' });
   check('Nečlen: intent produkt (test)', !!hIntent.paymentId && hIntent.gateway === 'test', JSON.stringify(hIntent));
   const hPayInfo = await api('GET', `/api/payments/${hIntent.paymentId}`);
@@ -570,9 +762,9 @@ async function main() {
   const gMinToken = gMinMail && (gMinMail.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
   await api('POST', `/api/guardian/${gMinToken}`, {
     name: 'Rodic Minora', relation: 'matka', email: minorReg.member.guardianEmail,
-    docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy', 'guardian_souhlas'],
+    docKeys: ['guardian_souhlas'], declareGuardian: true,
   });
-  await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy'] });
+  await consentWithVerification(['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'pouceni_rizika', 'stanovy']);
   const minorPay = await api('POST', '/api/payments', { purpose: 'produkt', productCode: 'airbag_day' });
   check('Mladistvý: vstup SE souhlasem rodiče povolen', !!minorPay.paymentId && minorPay.gateway === 'test', JSON.stringify(minorPay));
   const minorConfirm = await api('POST', `/api/payments/${minorPay.paymentId}/confirm`);
@@ -584,7 +776,7 @@ async function main() {
     street: 'Ulice 1', city: 'Krupka', zip: '417 41', email: `clen${Date.now()}@test.cz`,
     photo: TEST_PHOTO,
   });
-  await api('POST', '/api/consent', { docKeys: ['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'vzdani_prava', 'stanovy'] });
+  await consentWithVerification(['provozni_rad', 'cestne_prohlaseni', 'gdpr', 'pouceni_rizika', 'stanovy']);
   const p1 = await api('POST', '/api/payments', { purpose: 'prispevek' });
   const c1 = await api('POST', `/api/payments/${p1.paymentId}/confirm`);
   check('Člen: roční členství → active', c1.member && c1.member.status === 'active', JSON.stringify(c1.member));
@@ -604,10 +796,47 @@ async function main() {
   const dozMail2 = outboxD.messages.find((m) => m.to === 'dozor@airbag.test' && m.subject.includes('přihlášení'));
   const dozTok2 = dozMail2 && (dozMail2.body.match(/(https?:\/\/\S+)/) || [])[1].split('/').pop();
   await api('POST', `/api/login/${dozTok2}`);
+  // Bez záznamu o praktické instruktáži NIKOHO nevpustí — ani nečlena s platným
+  // vstupem, ani člena s aktivním členstvím (potvrzené dokumenty nestačí).
+  const chkHostNoInstr = await api('POST', '/api/check-card', { qrPayload: hCard.qrPayload });
+  check('Dozor: nečlen s platným vstupem bez instruktáže → zamítnuto', chkHostNoInstr.ok === false
+    && chkHostNoInstr.blocking.some((b) => b.key === 'instruction'), chkHostNoInstr.message);
+  const chkMemberNoInstr = await api('POST', '/api/check-card', { qrPayload: cCard.qrPayload });
+  check('Dozor: člen s aktivním členstvím bez instruktáže → zamítnuto', chkMemberNoInstr.ok === false, chkMemberNoInstr.message);
+
+  const instrHost = await api('POST', '/api/dozor/instruction', { memberId: host.member.id, result: 'absolvoval', note: 'Nečlen — nácvik dopadu' });
+  check('Instruktáž nečlena zaznamenána', instrHost.ok === true && instrHost.instructionCompleted === true);
+  const instrMember = await api('POST', '/api/dozor/instruction', { memberId: regC.member.id, result: 'absolvoval' });
+  check('Instruktáž člena zaznamenána', instrMember.ok === true && instrMember.entryAllowed === true);
+
   const chkHost = await api('POST', '/api/check-card', { qrPayload: hCard.qrPayload });
   check('Dozor: vstup nečlena povolen (entitlement)', chkHost.ok === true && chkHost.accessReason === 'entitlement', JSON.stringify({ ok: chkHost.ok, reason: chkHost.accessReason }));
   const chkMember = await api('POST', '/api/check-card', { qrPayload: cCard.qrPayload });
   check('Dozor: člen povolen (membership)', chkMember.ok === true && chkMember.accessReason === 'membership', JSON.stringify({ ok: chkMember.ok, reason: chkMember.accessReason }));
+
+  // ── VSTUPNÍ PIN: ověření totožnosti u vstupu (proti zneužití cizí karty) ──
+  const pinNoPass = await api('POST', '/api/member/entry-pin', { pin: '1234' });
+  check('PIN bez hesla → nelze nastavit', ['CHYBI_HESLO', 'NEPLATNE_HESLO'].includes(pinNoPass.error), JSON.stringify(pinNoPass.error));
+  await api('POST', '/api/set-password', { password: ADULT_PASS });
+  // (jsme přihlášeni jako superadmin; PIN nastavíme členovi přes jeho vlastní účet)
+  await reloginAdultMagic(regC.member.email);
+  await api('POST', '/api/set-password', { password: 'pin-heslo-789' });
+  const pinSet = await api('POST', '/api/member/entry-pin', { pin: '4321', password: 'pin-heslo-789' });
+  check('Vstupní PIN nastaven', pinSet.ok === true && pinSet.entryPinSet === true, JSON.stringify(pinSet));
+  const pinBad = await api('POST', '/api/member/entry-pin', { pin: '4321', password: 'spatne' });
+  check('PIN se špatným heslem → zamítnuto', pinBad.error === 'NEPLATNE_HESLO');
+
+  await loginDozorMagic();
+  const lookupNoPin = await api('POST', '/api/dozor/lookup', { qrPayload: cCard.qrPayload, record: false });
+  check('Účastník s PINem bez zadání PINu → vstup zamítnut', !!lookupNoPin.card && lookupNoPin.ok === false
+    && lookupNoPin.card.identityCheck.pinOk === false,
+    (lookupNoPin.card && lookupNoPin.card.identityCheck.note) || JSON.stringify(lookupNoPin).slice(0, 200));
+  const lookupBadPin = await api('POST', '/api/dozor/lookup', { qrPayload: cCard.qrPayload, identityPin: '0000', record: false });
+  check('Nesprávný PIN → vstup zamítnut', !!lookupBadPin.card && lookupBadPin.ok === false, JSON.stringify(lookupBadPin).slice(0, 200));
+  const lookupPin = await api('POST', '/api/dozor/lookup', { qrPayload: cCard.qrPayload, identityPin: '4321' });
+  check('Správný PIN zadaný osobně → vstup povolen', !!lookupPin.card && lookupPin.ok === true
+    && lookupPin.card.identityCheck.method === 'qr+foto+pin',
+    JSON.stringify(lookupPin.card ? lookupPin.card.identityCheck : lookupPin).slice(0, 300));
 
   // ---------- TOK J: důkazní vrstva — kontrola integrity a odhalení zásahu ----------
   console.log('\n=== TOK J: důkazní vrstva (protokol, integrita, odhalení zásahu do znění) ===\n');
@@ -619,19 +848,32 @@ async function main() {
   const foreignDocs = await api('GET', '/api/documents/signed/00000000-0000-0000-0000-000000000000', undefined, { raw: true });
   check('Doklad cizího člena neexistuje → 404', foreignDocs.status === 404, String(foreignDocs.status));
 
-  // Simulace zásahu: přepíšeme ZNĚNÍ dokumentu v DB (otisk u souhlasu zůstane původní)
+  // Simulace zásahu: přepíšeme ZNĚNÍ dokumentu v DB (otisk u souhlasu zůstane původní).
+  // POZOR: obnova znění je v `finally` — kdyby test spadl (nebo byl přerušen),
+  // zůstala by v lokální DB rozbitá důkazní stopa a každý další běh by hlásil
+  // „otisk nesouhlasí“. Obnova musí proběhnout VŽDY.
   const dT = new Database(path.join(__dirname, '..', 'data', 'airbag.db'));
-  const origDoc = dT.prepare("SELECT content, content_hash FROM doc_versions WHERE doc_key = 'provozni_rad' ORDER BY version DESC LIMIT 1").get();
-  dT.prepare("UPDATE doc_versions SET content = content || '\\nZMENA PO PODPISU' WHERE doc_key = 'provozni_rad'").run();
-  const vBad = await api('GET', '/api/documents/verify');
-  check('Zásah do znění po podpisu → kontrola ohlásí problém', !!vBad && vBad.problems >= 1 && vBad.verdict === 'PROBLEM', `${vBad && vBad.problems} problémů`);
-  const badProtocol = await apiText(`/api/documents/protocol/${regC.member.id}`);
-  check('Protokol u rozbitého otisku varuje (OTISK NESOUHLASÍ)', badProtocol.text.includes('OTISK NESOUHLASÍ'));
-  // vrátíme původní znění → kontrola musí být zase v pořádku
-  dT.prepare("UPDATE doc_versions SET content = ? WHERE doc_key = 'provozni_rad' AND content_hash = ?").run(origDoc.content, origDoc.content_hash);
+  const origDoc = dT.prepare("SELECT content, content_hash, version FROM doc_versions WHERE doc_key = 'provozni_rad' ORDER BY version DESC LIMIT 1").get();
+  try {
+    // POZOR: měníme POUZE testovanou (nejnovější) verzi — bez `AND version = ?`
+    // by se „rozmazala" i historická verze, kterou obnova nevrátí a důkazní
+    // stopa by zůstala nevratně rozbitá (přesně to se dřív stalo u v1).
+    dT.prepare("UPDATE doc_versions SET content = content || '\\nZMENA PO PODPISU' WHERE doc_key = 'provozni_rad' AND version = ?").run(origDoc.version);
+    const vBad = await api('GET', '/api/documents/verify');
+    check('Zásah do znění po podpisu → kontrola ohlásí problém', !!vBad && vBad.problems >= 1 && vBad.verdict === 'PROBLEM', `${vBad && vBad.problems} problémů`);
+    const badProtocol = await apiText(`/api/documents/protocol/${regC.member.id}`);
+    check('Protokol u rozbitého otisku varuje (OTISK NESOUHLASÍ)', badProtocol.text.includes('OTISK NESOUHLASÍ'));
+  } finally {
+    // vrátíme původní znění → kontrola musí být zase v pořádku
+    dT.prepare("UPDATE doc_versions SET content = ? WHERE doc_key = 'provozni_rad' AND version = ?").run(origDoc.content, origDoc.version);
+    const restored = dT.prepare("SELECT content_hash FROM doc_versions WHERE doc_key = 'provozni_rad' AND version = ?").get(origDoc.version);
+    if (!restored || restored.content_hash !== origDoc.content_hash) {
+      console.error('POZOR: znění dokumentu se nepodařilo obnovit do původního stavu!');
+    }
+    dT.close();
+  }
   const vRestored = await api('GET', '/api/documents/verify');
   check('Po vrácení znění je kontrola opět v pořádku', vRestored.verdict === 'OK', JSON.stringify(vRestored.problems));
-  dT.close();
 
   // úklid testovacích členů po běhu (lokální DB) — evidence se nezanáší
   // (sync modul navíc @test.cz emaily do Supabase nikdy neodesílá)

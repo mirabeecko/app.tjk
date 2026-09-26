@@ -16,6 +16,8 @@ const express = require('express');
 const A = require('./auth');
 const D = require('./db');
 const X = require('./db-app');
+const R = require('./readiness');
+const Pwd = require('./password');
 const mailer = require('./mailer');
 const payments = require('./payments');
 const routes = require('./routes');
@@ -117,9 +119,10 @@ async function memberDocuments(memberId) {
 
 /**
  * Kompletní karta pro dozora (a pro superadmina).
- * Vrací identitu, stav členství, platnost, historii vstupů, dokumenty a fotku.
+ * Vrací identitu, stav členství, platnost, historii vstupů, dokumenty, fotku
+ * a PŘIPRAVENOST KE SKOKU (potvrzené dokumenty × instruktáž × podmínky dne).
  */
-async function buildMemberCard(member, { origin, refresh = false } = {}) {
+async function buildMemberCard(member, { origin, refresh = false, day, identityPin } = {}) {
   const st = effectiveStatus(member);
   let isMember = await isClubMember(member);
   let entitlement = null;
@@ -140,7 +143,30 @@ async function buildMemberCard(member, { origin, refresh = false } = {}) {
     }
   }
 
-  const allowed = !!(isMember || entitlement);
+  // ---- PŘIPRAVENOST: dokumenty + instruktáž + provozní den + totožnost ----
+  const ready = await R.readiness(member, { day });
+
+  // ---- OVĚŘENÍ TOTOŽNOSTI U VSTUPU ----
+  // Přiměřené ověření: QR karta účtu + porovnání fotografie dozorem, a pokud má
+  // účastník nastavený vstupní PIN, musí jej zadat OSOBNĚ (bez něj vstup ne).
+  const identity = { method: 'qr+foto', pinRequired: ready ? ready.identity.pinSet : false, pinOk: null, note: '' };
+  if (identity.pinRequired) {
+    if (identityPin == null || String(identityPin) === '') {
+      identity.pinOk = false;
+      identity.note = 'Účastník má nastavený vstupní PIN — vyzvěte jej, aby jej zadal osobně.';
+    } else if (!Pwd.verify(String(identityPin), member.entry_pin_hash)) {
+      identity.pinOk = false;
+      identity.note = 'Zadaný vstupní PIN nesouhlasí — vstup nelze povolit.';
+    } else {
+      identity.pinOk = true;
+      identity.method = 'qr+foto+pin';
+    }
+  } else if (ready && !ready.identity.pinSet) {
+    identity.note = 'Účastník nemá nastavený vstupní PIN — totožnost ověřena jen podle fotografie (doporučte mu PIN nastavit).';
+  }
+  const identityOk = !identity.pinRequired || identity.pinOk === true;
+
+  const allowed = !!(ready && ready.ready && identityOk);
   const kind = isMember ? 'clen' : 'neclen';
   const memberNo = member.member_no;
 
@@ -176,9 +202,14 @@ async function buildMemberCard(member, { origin, refresh = false } = {}) {
 
   let message;
   if (blocked) message = 'Přístup do účtu pozastaven vlastníkem — ověřte u správy spolku.';
-  else if (isMember) message = 'Členství aktivní — vstup povolen.';
-  else if (entitlement) message = 'Aktivní jednorázový vstup — vstup povolen.';
-  else if (st === 'expired' || (vu && vu < new Date())) message = 'Členství vypršelo — vstup zamítnut.';
+  else if (!identityOk) message = identity.note || 'Totožnost se nepodařilo ověřit.';
+  else if (ready && !ready.ready) {
+    message = `Vstup zatím není možný: ${ready.blocking.map((c) => c.message || c.label).join(' ')}`.trim();
+  } else if (allowed) {
+    message = isMember
+      ? 'Členství aktivní, dokumenty i instruktáž v pořádku, dnešní kontrola vyhovuje — vstup povolen.'
+      : 'Jednorázový vstup platný, dokumenty i instruktáž v pořádku, dnešní kontrola vyhovuje — vstup povolen.';
+  } else if (st === 'expired' || (vu && vu < new Date())) message = 'Členství vypršelo — vstup zamítnut.';
   else message = 'Žádné platné členství ani vstup — zamítnuto.';
 
   const age = X.ageFrom(member.birth_date);
@@ -236,7 +267,37 @@ async function buildMemberCard(member, { origin, refresh = false } = {}) {
       reason: blocked ? 'blocked' : isMember ? 'membership' : entitlement ? 'entitlement' : 'none',
       message,
       entitlementUntil: entitlement ? entitlement.valid_until : null,
+      // Tři ODDĚLENÉ skutečnosti — v UI i v protokolu se nesmějí slévat:
+      documentsConfirmed: ready ? ready.statements.documentsConfirmed : false,
+      instructionCompleted: ready ? ready.statements.instructionCompleted : false,
+      entryAllowed: allowed,
+      blocking: ready ? ready.blocking.map((c) => ({ key: c.key, label: c.label, message: c.message })) : [],
     },
+    instruction: ready
+      ? {
+        ok: ready.instruction.ok,
+        expectedVersion: ready.instruction.expectedVersion,
+        title: ready.instruction.title,
+        last: ready.instruction.last,
+        message: ready.instruction.message,
+      }
+      : null,
+    day: ready
+      ? {
+        day: ready.dayState.day,
+        opened: ready.dayState.opened,
+        openedAt: ready.dayState.openedAt,
+        dozorName: ready.dayState.dozorName,
+        verdict: ready.dayState.verdict,
+        checks: ready.dayState.checks,
+        defects: ready.dayState.defects,
+        interrupted: ready.dayState.interrupted,
+        interruptReason: ready.dayState.interruptReason,
+        source: ready.dayState.source,
+        message: ready.dayState.message,
+      }
+      : null,
+    identityCheck: identity,
     entries: {
       total: entriesTotal,
       recent: entriesRecent.map((e) => ({
@@ -260,6 +321,11 @@ async function buildMemberCard(member, { origin, refresh = false } = {}) {
       phone: member.guardian_phone || null,
       consentStatus: member.guardian_status || 'not_required',
       grantedAt: member.guardian_granted_at || null,
+      // Vazba k dítěti: elektronický odkaz ji neprokazuje — ověřuje ji dozor
+      verificationMethod: ready && ready.guardian ? ready.guardian.verificationMethodDeclared : null,
+      relationVerified: ready && ready.guardian ? ready.guardian.relationVerified : false,
+      verification: ready && ready.guardian ? ready.guardian.verification : null,
+      message: ready && ready.guardian ? ready.guardian.message : null,
     } : null,
     audit: auditRows.map((a) => ({
       action: a.action,
@@ -315,9 +381,14 @@ router.post('/dozor/lookup', A.requireRole('dozor', 'vybor', 'superadmin'), asyn
     return res.status(404).json({ error: 'NEPLATNA_KARTA', message: 'Karta nepatří žádnému účtu.' });
   }
 
-  const info = await buildMemberCard(member, { origin, refresh: b.refresh !== false });
+  const info = await buildMemberCard(member, {
+    origin,
+    refresh: b.refresh !== false,
+    day: b.day ? s(b.day) : undefined,
+    identityPin: b.identityPin != null ? b.identityPin : null,
+  });
 
-  // ---- Záznam o vstupu (člen i nečlen) ----
+  // ---- Záznam o vstupu (člen i nečlen) — včetně podmínek, za kterých padl verdikt
   let entryId = null;
   if (b.record !== false) {
     const entry = await X.Entries.add({
@@ -334,6 +405,19 @@ router.post('/dozor/lookup', A.requireRole('dozor', 'vybor', 'superadmin'), asyn
       valid_until: info.membership.validUntil || info.access.entitlementUntil || null,
       member_kind: info.membership.kind,
       note: s(b.note),
+      // snapshot podmínek vstupu (provozní řád čl. 3 + čl. 9)
+      day: info.day ? info.day.day : null,
+      provozni_den_id: info.day && info.day.opened ? (await X.ProvozniDen.getByDay(info.day.day))?.id || null : null,
+      day_verdict: info.day ? info.day.verdict : null,
+      instruction_id: info.instruction && info.instruction.last && info.instruction.ok
+        ? (await X.Instructions.lastPassedFor(info.identity.memberId))?.id || null
+        : null,
+      instruction_ok: info.access.instructionCompleted ? 1 : 0,
+      documents_ok: info.access.documentsConfirmed ? 1 : 0,
+      identity_check: info.identityCheck.method,
+      blocking: info.access.blocking && info.access.blocking.length
+        ? JSON.stringify(info.access.blocking.map((x) => x.message || x.label))
+        : (info.access.allowed ? '' : ''),
     });
     entryId = entry.id;
     info.entries.total += 1;
@@ -350,26 +434,489 @@ router.post('/dozor/lookup', A.requireRole('dozor', 'vybor', 'superadmin'), asyn
   res.json({ ok: info.access.allowed, entryId, card: info });
 }));
 
-/** Manuální záznam vstupu (host bez QR, telefonicky domluvená návštěva…). */
+/**
+ * Manuální záznam vstupu (host bez QR, dohodnutá návštěva, offline zápis).
+ * POZOR: i ruční záznam podléhá provozním podmínkám — bez zaznamenané
+ * vyhovující denní kontroly a otevřeného provozu se vstup NEPOVOLÍ (jen se
+ * eviduje zamítnutý pokus). Tělo: { personName, kind, note, identityCheck,
+ * identityDoc, override?, overrideReason?, source?, offlineRef?, at? }
+ */
 router.post('/dozor/entry', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
   const b = req.body || {};
   const name = s(b.personName).trim();
   if (!name) return res.status(400).json({ error: 'VALIDACE', message: 'Zadejte jméno návštěvníka.' });
   const dozor = req.member;
+  const dozorName = `${dozor.first_name} ${dozor.last_name}`.trim();
+  const dayState = await R.operationalDayState(b.day ? s(b.day) : undefined);
+  const override = b.override === true && s(b.overrideReason).trim().length >= 5;
+  const allowed = dayState.ok || override;
+  const reason = allowed
+    ? (override && !dayState.ok
+      ? `Výjimka dozoru při nesplněné denní kontrole: ${s(b.overrideReason)}`
+      : 'Ruční záznam dozoru.')
+    : dayState.message || 'Vstup není možný — chybí vyhovující denní kontrola.';
   const entry = await X.Entries.add({
     member_id: b.memberId || null,
     person_name: name,
     person_no: b.memberNo || null,
     kind: b.kind === 'clen' ? 'clen' : 'neclen',
     entitlement_kind: b.entitlementKind || null,
-    access_ok: b.accessOk === false ? 0 : 1,
-    reason: s(b.reason) || 'Ruční záznam dozoru.',
-    source: 'manual',
+    access_ok: allowed ? 1 : 0,
+    reason,
+    source: s(b.source) || 'manual',
     recorded_by: dozor.id,
-    recorded_by_name: `${dozor.first_name} ${dozor.last_name}`.trim(),
+    recorded_by_name: dozorName,
     note: s(b.note),
+    day: dayState.day,
+    day_verdict: dayState.verdict,
+    identity_check: s(b.identityCheck) || 'manual+doklad',
+    blocking: allowed ? '' : JSON.stringify([reason]),
   });
-  res.json({ ok: true, entry });
+  if (!allowed) {
+    return res.status(409).json({
+      error: 'PROVOZ_NEPRIPRAVEN',
+      message: reason,
+      entryId: entry.id,
+      day: { day: dayState.day, opened: dayState.opened, verdict: dayState.verdict },
+      hint: 'Nejprve v Provozní knize otevřete provozní den se zaznamenanou vyhovující kontrolou.',
+    });
+  }
+  res.json({ ok: true, entry, day: { day: dayState.day, verdict: dayState.verdict, openedAt: dayState.openedAt } });
+}));
+
+// ===========================================================================
+// PROVOZNÍ KNIHA (provozní den, kontroly, závady, přerušení, mimořádné události)
+// ===========================================================================
+
+/** Stav provozního dne + jeho záznamy (co má dozor před sebou). */
+router.get('/dozor/provozni-den', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const day = req.query.day ? s(req.query.day) : R.dayOf();
+  const row = await X.ProvozniDen.getByDay(day);
+  const zaznamy = await X.ProvozniZaznamy.listForDay(day);
+  const kontroly = row ? X.checkVerdict(row) : null;
+  // Jediný zdroj pravdy pro „je vstup možný“ = readiness.operationalDayState
+  // (zahrnuje i ukončený den a přerušení) — nesmí se počítat na dvou místech.
+  const state = await R.operationalDayState(day);
+  res.json({
+    day,
+    exists: !!row,
+    opened: state.opened,
+    openedAt: state.openedAt,
+    dozorName: state.dozorName,
+    verdict: state.verdict,
+    verdictNote: row ? row.verdict_note : '',
+    checks: kontroly ? kontroly.items : null,
+    checkNote: row ? row.check_note : '',
+    defects: row ? row.defects : '',
+    interrupted: state.interrupted,
+    interruptedAt: state.interruptedAt,
+    interruptReason: state.interruptReason,
+    resumedAt: row ? row.resumed_at : null,
+    closed: state.closed,
+    closedAt: state.closedAt,
+    source: row ? row.source : null,
+    entryAllowed: state.ok,
+    entryMessage: state.message,
+    records: zaznamy.map((z) => ({
+      id: z.id, type: z.type, text: z.text, severity: z.severity,
+      dozor: z.dozor_name, at: z.at, source: z.source, offline: z.source === 'offline',
+    })),
+    instructionsToday: await X.Instructions.count(day),
+  });
+}));
+
+/**
+ * OTEVŘENÍ / AKTUALIZACE PROVOZNÍHO DNE (denní kontrola zařízení).
+ * Dokud kontrola nevyhovuje, aplikace vstup nepovolí.
+ * Tělo: { day?, mattress, pressure, anchoring, ramp, surroundings,
+ *         checkNote, defects, dozorPresent, source?, offlineRef?, at? }
+ */
+router.post('/dozor/provozni-den', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  const dozor = req.member;
+  const dozorName = `${dozor.first_name} ${dozor.last_name}`.trim();
+  const day = b.day ? s(b.day) : R.dayOf();
+  const norm = (v) => (['ok', 'zavada', 'neprovedeno'].includes(s(v)) ? s(v) : 'neprovedeno');
+  const checks = {
+    check_mattress: norm(b.mattress),
+    check_pressure: norm(b.pressure),
+    check_anchoring: norm(b.anchoring),
+    check_ramp: norm(b.ramp),
+    check_surroundings: norm(b.surroundings),
+  };
+  const row = await X.ProvozniDen.open({
+    day,
+    dozor_id: dozor.id,
+    dozor_name: dozorName,
+    dozor_present: b.dozorPresent !== false,
+    ...checks,
+    check_note: s(b.checkNote),
+    defects: s(b.defects),
+    verdict_note: s(b.verdictNote),
+    source: s(b.source) || 'app',
+    offline_ref: s(b.offlineRef) || null,
+    synced_at: s(b.source) === 'offline' ? D.now() : null,
+    at: s(b.at) || undefined,
+  });
+  const verdict = X.checkVerdict(row);
+  await X.ProvozniZaznamy.add({
+    provozni_den_id: row.id,
+    day,
+    type: 'kontrola',
+    text: `Denní kontrola: ${verdict.items.map((i) => `${i.label} = ${i.value}`).join(', ')}${s(b.checkNote) ? ` — ${s(b.checkNote)}` : ''}. Verdikt: ${verdict.verdict}.`,
+    severity: verdict.verdict === 'vyhovuje' ? 'info' : 'critical',
+    dozor_id: dozor.id,
+    dozor_name: dozorName,
+    at: s(b.at) || undefined,
+    source: s(b.source) || 'app',
+    offline_ref: s(b.offlineRef) || null,
+  });
+  if (verdict.verdict !== 'vyhovuje') {
+    await X.ProvozniZaznamy.add({
+      provozni_den_id: row.id,
+      day,
+      type: 'zavada',
+      text: s(b.defects) || verdict.items.filter((i) => i.value === 'zavada').map((i) => `${i.label}: závada`).join(', ') || 'Kontrola nevyhovuje — provoz nezahájen.',
+      severity: 'critical',
+      dozor_id: dozor.id,
+      dozor_name: dozorName,
+      at: s(b.at) || undefined,
+      source: s(b.source) || 'app',
+    });
+  } else {
+    await X.ProvozniZaznamy.add({
+      provozni_den_id: row.id,
+      day,
+      type: 'otevreni',
+      text: `Provoz otevřen dozorem ${dozorName} (potvrzena přítomnost dozoru).`,
+      dozor_id: dozor.id,
+      dozor_name: dozorName,
+      at: s(b.at) || undefined,
+      source: s(b.source) || 'app',
+    });
+  }
+  res.json({
+    ok: true,
+    day,
+    verdict: verdict.verdict,
+    entryAllowed: verdict.verdict === 'vyhovuje',
+    checks: verdict.items,
+    message: verdict.verdict === 'vyhovuje'
+      ? 'Kontrola vyhovuje — provoz je otevřen, vstupy lze povolit.'
+      : 'Kontrola NEVYHOVUJE — provoz nezahajujte a závadu odstraňte.',
+    row,
+  });
+}));
+
+/** Přerušení / obnovení provozu. Tělo: { action: 'interrupt'|'resume', reason|note, day?, source?, at? } */
+router.post('/dozor/provozni-den/preruseni', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  const dozor = req.member;
+  const dozorName = `${dozor.first_name} ${dozor.last_name}`.trim();
+  const day = b.day ? s(b.day) : R.dayOf();
+  const row = await X.ProvozniDen.getByDay(day);
+  if (!row) return res.status(409).json({ error: 'DEN_NEEXISTUJE', message: 'Provozní den není otevřen.' });
+  const action = b.action === 'resume' ? 'resume' : 'interrupt';
+  if (action === 'interrupt') {
+    if (!s(b.reason).trim()) return res.status(400).json({ error: 'VALIDACE', message: 'Uveďte důvod přerušení provozu.' });
+    await X.ProvozniDen.interrupt(row.id, { reason: s(b.reason), at: s(b.at) || undefined, dozorName });
+    await X.ProvozniZaznamy.add({
+      provozni_den_id: row.id, day, type: 'preruseni', text: s(b.reason), severity: 'warning',
+      dozor_id: dozor.id, dozor_name: dozorName, at: s(b.at) || undefined, source: s(b.source) || 'app',
+    });
+  } else {
+    await X.ProvozniDen.resume(row.id, { note: s(b.note), at: s(b.at) || undefined, dozorName });
+    await X.ProvozniZaznamy.add({
+      provozni_den_id: row.id, day, type: 'obnoveni', text: s(b.note) || 'Provoz obnoven.', severity: 'info',
+      dozor_id: dozor.id, dozor_name: dozorName, at: s(b.at) || undefined, source: s(b.source) || 'app',
+    });
+  }
+  const fresh = await X.ProvozniDen.getById(row.id);
+  res.json({
+    ok: true,
+    interrupted: !!(fresh.interrupted_at && !fresh.resumed_at),
+    interruptedAt: fresh.interrupted_at,
+    interruptReason: fresh.interrupt_reason,
+    resumedAt: fresh.resumed_at,
+    entryAllowed: fresh.verdict === 'vyhovuje' && !(fresh.interrupted_at && !fresh.resumed_at),
+  });
+}));
+
+/** Ukončení provozního dne. */
+router.post('/dozor/provozni-den/ukonceni', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  const day = b.day ? s(b.day) : R.dayOf();
+  const row = await X.ProvozniDen.getByDay(day);
+  if (!row) return res.status(409).json({ error: 'DEN_NEEXISTUJE', message: 'Provozní den není otevřen.' });
+  const dozor = req.member;
+  const dozorName = `${dozor.first_name} ${dozor.last_name}`.trim();
+  await X.ProvozniDen.close(row.id);
+  await X.ProvozniZaznamy.add({
+    provozni_den_id: row.id, day, type: 'ukonceni',
+    text: s(b.note) || `Provoz ukončen dozorem ${dozorName}.`, severity: 'info',
+    dozor_id: dozor.id, dozor_name: dozorName, source: s(b.source) || 'app',
+  });
+  res.json({ ok: true, closedAt: D.now() });
+}));
+
+/** Obecný záznam do provozní knihy (mimořádná událost, poznámka, závada…). */
+router.post('/dozor/provozni-den/zaznam', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  const text = s(b.text).trim();
+  if (!text) return res.status(400).json({ error: 'VALIDACE', message: 'Zadejte text záznamu.' });
+  const type = ['mimoradna_udalost', 'zavada', 'poznamka', 'preruseni', 'obnoveni', 'ukonceni', 'instruktaz', 'vstup', 'kontrola', 'otevreni'].includes(s(b.type))
+    ? s(b.type)
+    : 'poznamka';
+  const day = b.day ? s(b.day) : R.dayOf();
+  const dozor = req.member;
+  const dozorName = `${dozor.first_name} ${dozor.last_name}`.trim();
+  const row = await X.ProvozniDen.getByDay(day);
+  const zaznam = await X.ProvozniZaznamy.add({
+    provozni_den_id: row ? row.id : null,
+    day,
+    type,
+    text,
+    severity: ['mimoradna_udalost', 'zavada'].includes(type) ? 'critical' : s(b.severity) || 'info',
+    dozor_id: dozor.id,
+    dozor_name: dozorName,
+    at: s(b.at) || undefined,
+    source: s(b.source) || 'app',
+    offline_ref: s(b.offlineRef) || null,
+    synced_at: s(b.source) === 'offline' ? D.now() : null,
+  });
+  res.json({ ok: true, record: zaznam });
+}));
+
+/** Výpis provozní knihy za poslední dny (pro dozora i pro tisk). */
+router.get('/dozor/provozni-kniha', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const days = Math.min(60, Math.max(1, parseInt(req.query.days, 10) || 14));
+  const rows = await X.ProvozniDen.recent(days);
+  const out = [];
+  for (const r of rows) {
+    const v = X.checkVerdict(r);
+    out.push({
+      day: r.day,
+      dozorName: r.dozor_name,
+      openedAt: r.opened_at,
+      verdict: r.verdict,
+      checks: v.items,
+      checkNote: r.check_note,
+      defects: r.defects,
+      interruptedAt: r.interrupted_at,
+      interruptReason: r.interrupt_reason,
+      resumedAt: r.resumed_at,
+      closedAt: r.closed_at,
+      source: r.source,
+      offline: r.source === 'offline',
+      records: (await X.ProvozniZaznamy.listForDay(r.day)).map((z) => ({
+        type: z.type, text: z.text, severity: z.severity, dozor: z.dozor_name, at: z.at, source: z.source,
+      })),
+      instructions: await X.Instructions.count(r.day),
+    });
+  }
+  res.json({ days, count: out.length, book: out });
+}));
+
+// ===========================================================================
+// PRAKTICKÁ INSTRUKTÁŽ (zaznamenává POVĚŘENÝ DOZOR až po instruktáži)
+// ===========================================================================
+
+/**
+ * Záznam o praktické instruktáži. NENÍ to potvrzení dokumentů: účastník se
+ * tímto dostane do stavu „absolvovaná instruktáž“, který je podmínkou vstupu.
+ * Tělo: { memberId, participantName?, result: 'absolvoval'|'neabsolvoval',
+ *         reason?, note?, day?, at?, source?, offlineRef? }
+ */
+router.post('/dozor/instruction', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  const dozor = req.member;
+  const dozorName = `${dozor.first_name} ${dozor.last_name}`.trim();
+  const result = b.result === 'neabsolvoval' ? 'neabsolvoval' : 'absolvoval';
+  const doc = await D.DocVersions.latest(R.INSTRUCTION_DOC_KEY);
+  if (!doc) return res.status(500).json({ error: 'CHYBI_INSTRUKTACE', message: 'Verze instruktáže není v systému.' });
+  if (result === 'neabsolvoval' && !s(b.reason).trim()) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'U výsledku „neabsolvoval“ uveďte důvod.' });
+  }
+
+  let member = null;
+  if (b.memberId) {
+    member = await D.Members.getById(b.memberId);
+    if (!member) return res.status(404).json({ error: 'NENALEZENO', message: 'Účastník nebyl nalezen.' });
+  }
+  const name = member
+    ? `${member.first_name} ${member.last_name}`.trim()
+    : s(b.participantName).trim();
+  if (!name) return res.status(400).json({ error: 'VALIDACE', message: 'Zadejte účastníka instruktáže (člena nebo hosta).' });
+
+  // U hosta bez účtu se připouští jen záznam s alespoň jménem (evidence dozoru).
+  const age = member ? X.ageFrom(member.birth_date) : null;
+  const rec = await X.Instructions.add({
+    member_id: member ? member.id : null,
+    participant_name: name,
+    participant_no: member ? member.member_no : (b.participantNo || null),
+    participant_birth: member ? member.birth_date : null,
+    is_minor: age !== null && age < 18 ? 1 : 0,
+    dozor_id: dozor.id,
+    dozor_name: dozorName,
+    dozor_role: dozor.role,
+    instructed_at: s(b.at) || D.now(),
+    doc_key: R.INSTRUCTION_DOC_KEY,
+    doc_version: doc.version,
+    content_hash: doc.content_hash,
+    result,
+    reason: s(b.reason),
+    note: s(b.note),
+    source: s(b.source) || 'app',
+    offline_ref: s(b.offlineRef) || null,
+    synced_at: s(b.source) === 'offline' ? D.now() : null,
+  });
+
+  // Zápis do provozní knihy (instruktáž je provozní skutečnost).
+  const day = s(b.day) || R.dayOf(rec.instructed_at);
+  const dayRow = await X.ProvozniDen.getByDay(day);
+  await X.ProvozniZaznamy.add({
+    provozni_den_id: dayRow ? dayRow.id : null,
+    day,
+    type: 'instruktaz',
+    text: `Instruktáž ${result === 'absolvoval' ? 'absolvována' : 'NEabsolvována'}: ${name}${s(b.reason) ? ` — ${s(b.reason)}` : ''} (dozor ${dozorName}, verze instruktáže ${doc.version}).`,
+    severity: result === 'absolvoval' ? 'info' : 'warning',
+    dozor_id: dozor.id,
+    dozor_name: dozorName,
+    at: rec.instructed_at,
+    source: s(b.source) || 'app',
+    offline_ref: s(b.offlineRef) || null,
+  });
+
+  const ready = member ? await R.readiness(member, { day }) : null;
+  res.json({
+    ok: true,
+    instruction: {
+      id: rec.id,
+      memberId: rec.member_id,
+      participantName: rec.participant_name,
+      dozor: rec.dozor_name,
+      instructedAt: rec.instructed_at,
+      docVersion: rec.doc_version,
+      docKey: rec.doc_key,
+      contentHash: rec.content_hash,
+      result: rec.result,
+      source: rec.source,
+    },
+    documentsConfirmed: ready ? ready.statements.documentsConfirmed : false,
+    instructionCompleted: ready ? ready.statements.instructionCompleted : result === 'absolvoval',
+    entryAllowed: ready ? ready.ready : null,
+    blocking: ready ? ready.blocking.map((x) => ({ key: x.key, label: x.label, message: x.message })) : [],
+    note: 'Instruktáž je samostatný záznam — potvrzení dokumentů v aplikaci ji nenahrazuje.',
+  });
+}));
+
+/** Výpis instruktáží (účastníka nebo dne). */
+router.get('/dozor/instructions', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const memberId = s(req.query.memberId);
+  const day = s(req.query.day);
+  const rows = memberId
+    ? await X.Instructions.listForMember(memberId, 50)
+    : day
+      ? await X.Instructions.listForDay(day)
+      : await X.Instructions.recent(100);
+  res.json({
+    count: rows.length,
+    instructions: rows.map((r) => ({
+      id: r.id,
+      memberId: r.member_id,
+      participantName: r.participant_name,
+      participantNo: r.participant_no,
+      dozor: r.dozor_name,
+      instructedAt: r.instructed_at,
+      recordedAt: r.recorded_at,
+      docKey: r.doc_key,
+      docVersion: r.doc_version,
+      result: r.result,
+      reason: r.reason,
+      source: r.source,
+      offline: r.source === 'offline',
+    })),
+  });
+}));
+
+// ===========================================================================
+// OVĚŘENÍ VAZBY ZÁKONNÉHO ZÁSTUPCE (u nezletilých) — ověřuje DOZOR na místě
+// ===========================================================================
+
+/**
+ * Dozor zapisuje, že ověřil vazbu zákonného zástupce k nezletilému podle dokladu.
+ * Bez tohoto záznamu nezletilý na zařízení nevstoupí (elektronický odkaz vztah
+ * k dítěti neprokazuje).
+ * Tělo: { memberId, method, methodNote?, at?, source? }
+ */
+router.post('/dozor/guardian-verify', A.requireRole('dozor', 'vybor', 'superadmin'), asyncRoute(async (req, res) => {
+  const b = req.body || {};
+  const memberId = s(b.memberId);
+  if (!memberId) return res.status(400).json({ error: 'VALIDACE', message: 'Chybí účastník (memberId).' });
+  const member = await D.Members.getById(memberId);
+  if (!member) return res.status(404).json({ error: 'NENALEZENO', message: 'Nezletilý účastník nebyl nalezen.' });
+  const method = ['rodny_list', 'doklad_totoznosti', 'pribuzensky_doklad', 'jine'].includes(s(b.method)) ? s(b.method) : null;
+  if (!method) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Uveďte způsob ověření (rodný list / doklad totožnosti / jiný doklad).' });
+  }
+  if (member.guardian_status !== 'granted') {
+    return res.status(409).json({
+      error: 'CHYBI_SOUHLAS',
+      message: 'Zákonný zástupce nejprve musí udělit souhlas s účastí (e-mailem), teprve pak lze ověřit vazbu k dítěti.',
+    });
+  }
+  const dozor = req.member;
+  const dozorName = `${dozor.first_name} ${dozor.last_name}`.trim();
+  const rec = await X.GuardianVerifications.add({
+    member_id: member.id,
+    child_name: `${member.first_name} ${member.last_name}`.trim(),
+    guardian_name: member.guardian_name || '',
+    guardian_relation: member.guardian_relation || '',
+    method,
+    method_note: s(b.methodNote),
+    verified_by: dozor.id,
+    verified_by_name: dozorName,
+    verified_at: s(b.at) || D.now(),
+    source: s(b.source) || 'app',
+  });
+  await D.Members.update(member.id, {
+    guardian_verified_method: method,
+    guardian_verified_by: dozor.id,
+    guardian_verified_at: rec.verified_at,
+    guardian_verified_note: s(b.methodNote) || `Vazba ověřena dozorem ${dozorName} (${method}).`,
+  });
+  const methodLabel = ({
+    rodny_list: 'rodný list',
+    doklad_totoznosti: 'doklad totožnosti',
+    pribuzensky_doklad: 'doklad o příbuzenském vztahu',
+    jine: 'jiný doklad',
+  })[method];
+  const day = s(b.day) || R.dayOf();
+  const dayRow = await X.ProvozniDen.getByDay(day);
+  await X.ProvozniZaznamy.add({
+    provozni_den_id: dayRow ? dayRow.id : null,
+    day,
+    type: 'poznamka',
+    text: `Ověřena vazba zákonného zástupce (${member.guardian_name || 'neuvedeno'}) k nezletilému ${rec.child_name} podle dokladu: ${methodLabel}. Ověřil ${dozorName}.`,
+    severity: 'info',
+    dozor_id: dozor.id,
+    dozor_name: dozorName,
+    at: rec.verified_at,
+    source: s(b.source) || 'app',
+  });
+  const ready = await R.readiness(member, { day });
+  res.json({
+    ok: true,
+    verification: {
+      method,
+      methodLabel,
+      note: rec.method_note,
+      by: dozorName,
+      at: rec.verified_at,
+    },
+    entryAllowed: ready.ready,
+    blocking: ready.blocking.map((x) => ({ key: x.key, label: x.label, message: x.message })),
+  });
 }));
 
 /** Poslední vstupy — přehled dozora na směně. */
