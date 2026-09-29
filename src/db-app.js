@@ -851,7 +851,8 @@ const ConsentCodes = {
   },
 };
 
-module.exports = {
+// Čtení v rámci jednoho requestu se cachuje (reqcache) — viz src/reqcache.js.
+module.exports = require('./reqcache').wrapModule({
   TBL,
   ageFrom,
   Entries,
@@ -871,4 +872,4 @@ module.exports = {
   ConsentCodes,
   CONSENT_CODE_TTL_MIN,
   DocLifecycle,
-};
+});

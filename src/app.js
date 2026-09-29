@@ -10,6 +10,7 @@ const express = require('express');
 const A = require('./auth');
 const routes = require('./routes');
 const { seed } = require('./seed');
+const reqCache = require('./reqcache');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 
@@ -37,6 +38,32 @@ function buildApp() {
     console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
     next();
   });
+
+  // Cache čtení pro jeden request (viz src/reqcache.js): databáze je
+  // v eu-central-1, funkce ve Vercelu — každý ušetřený dotaz je znát.
+  // Musí být PŘED vším, co sahá do databáze (i před načtením session).
+  app.use((req, res, next) => reqCache.run(next));
+
+  // Diagnostika výkonu: kolik dotazů do databáze jeden request udělal.
+  // Zapíná se jen přes QUERY_LOG=1 (v produkci vypnuto).
+  if (process.env.QUERY_LOG) {
+    app.use((req, res, next) => {
+      const s = reqCache.stats();                 // úložiště tohoto requestu
+      res.on('finish', () => {
+        if (!s) return;
+        // Skutečné dotazy do databáze = volání surového SQL (raw.*).
+        const top = Object.entries(s.byMethod || {})
+          .filter(([k]) => k.startsWith('raw.'))
+          .sort((a, b) => b[1] - a[1]).slice(0, 10)
+          .map(([k, v]) => `${k.slice(4)}×${v}`).join(' ');
+        const real = Object.entries(s.byMethod || {})
+          .filter(([k]) => k.startsWith('raw.')).reduce((a, [, v]) => a + v, 0);
+        // eslint-disable-next-line no-console
+        console.log(`[db] ${req.method} ${req.url} → dotazyDB=${real} volaniMetod=${s.dbCalls} zCache=${s.hits} zápisy=${s.writes} | ${top}`);
+      });
+      next();
+    });
+  }
 
   app.use(A.loadSession);
 
@@ -96,7 +123,7 @@ function buildApp() {
       // dlouho v prohlížeči — bez toho se opakovaně stahovaly při každé navigaci.
       if (/\.(js|css|png|jpg|jpeg|svg|webp|ico|woff2?)$/i.test(filePath) &&
           !filePath.endsWith('sw.js')) {
-        res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       }
       // POZOR: HTML (app shell) se cachovat NESMÍ — jinak se uživateli drží stará
       // verze stránky i s odkazy na staré JS/CSS a aplikace se „neaktualizuje“.

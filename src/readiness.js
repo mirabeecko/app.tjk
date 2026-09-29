@@ -34,9 +34,9 @@ function dayOf(date) {
 }
 
 // ── 1) DOKUMENTY (potvrzení v aktuální verzi) ───────────────────────────────
-async function documentState(member) {
-  const st = await E.userState(member);
-  const req = await E.requiredDocUnion(member);
+async function documentState(member, stIn) {
+  const st = stIn || await E.userState(member);
+  const req = await E.requiredDocUnion(member, st);
   const signedMember = await E.signedDocKeysPublic(member.id, 'member');
   const signedGuardian = st.isMinor ? await E.signedDocKeysPublic(member.id, 'guardian') : {};
 
@@ -200,11 +200,12 @@ function identityState(member) {
  * Vrací `ready` = smí vstoupit (vše splněno) + seznam podmínek s důvody,
  * aby dozor i účastník viděli PŘESNĚ, co chybí.
  */
-async function readiness(member, { day, facilityCode = 'airbag', includeIdentity = true } = {}) {
+async function readiness(member, { day, facilityCode = 'airbag', includeIdentity = true, state } = {}) {
   if (!member) return null;
-  const st = await E.userState(member);
+  // `state` se předává z volajícího, aby se stav uživatele nepočítal víckrát.
+  const st = state || await E.userState(member);
   const [documents, instruction, guardian, dayState] = await Promise.all([
-    documentState(member),
+    documentState(member, st),
     instructionState(member),
     guardianState(member, st),
     operationalDayState(day, facilityCode),

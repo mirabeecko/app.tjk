@@ -17,6 +17,9 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const db = new Database(path.join(DATA_DIR, 'airbag.db'));
+
+// Měření skutečných dotazů (jen s QUERY_LOG=1, jinak nulová režie).
+if (process.env.QUERY_LOG) require('./reqcache').instrumentSqlite(db);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -186,11 +189,20 @@ const DocVersions = {
     return { id, docKey, version, title, contentHash: hash, effectiveFrom };
   },
   latest(docKey) {
-    return db
-      .prepare(
-        'SELECT * FROM doc_versions WHERE doc_key = ? ORDER BY version DESC LIMIT 1'
-      )
-      .get(docKey);
+    // Jeden dotaz na všechny klíče (latestMap) místo jednoho na každý klíč.
+    return this.latestMap().get(docKey) || null;
+  },
+  /** Nejnovější verze pro KAŽDÝ dokument jedním dotazem (Map: doc_key → řádek). */
+  latestMap() {
+    const rows = db.prepare(
+      `SELECT dv.* FROM doc_versions dv
+        WHERE dv.version = (
+          SELECT MAX(v2.version) FROM doc_versions v2 WHERE v2.doc_key = dv.doc_key
+        )`
+    ).all();
+    const map = new Map();
+    for (const r of rows) map.set(r.doc_key, r);
+    return map;
   },
   // Nová verze dokumentu (nebo v1) — content shodný => vrací aktuální beze změny
   createNext({ docKey, title, content, effectiveFrom }) {
@@ -200,8 +212,7 @@ const DocVersions = {
     return this.create(docKey, version, title || (latest && latest.title) || docKey, content, effectiveFrom || now());
   },
   latestAll() {
-    const keys = db.prepare('SELECT DISTINCT doc_key FROM doc_versions').all();
-    return keys.map((k) => this.latest(k.doc_key));
+    return [...this.latestMap().values()];
   },
   // KONKRÉTNÍ VERZE dokumentu — pro důkazní protokol („tohle znění člen podepsal“).
   byKeyVersion: (docKey, version) =>
@@ -496,6 +507,16 @@ const ProductVariants = {
       .prepare("SELECT * FROM product_variants WHERE product_id = ? ORDER BY sort_order, price_czk")
       .all(productId);
   },
+  /** Všechny varianty všech produktů jedním dotazem (Map: product_id → pole). */
+  listAllByProduct() {
+    const rows = db.prepare('SELECT * FROM product_variants ORDER BY product_id, sort_order, price_czk').all();
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.product_id)) map.set(r.product_id, []);
+      map.get(r.product_id).push(r);
+    }
+    return map;
+  },
   getById(id) { return db.prepare('SELECT * FROM product_variants WHERE id = ?').get(id) || null; },
   create({ productId, audience, ageType, priceCzk, docKeys, guardianDocKeys, active, sortOrder }) {
     const id = uuid();
@@ -571,7 +592,8 @@ const Notifications = {
   },
 };
 
-module.exports = {
+// Čtení se v rámci jednoho requestu cachuje (reqcache); cache se zahodí při zápisu.
+module.exports = require('./reqcache').wrapModule({
   db,
   raw,
   uuid,
@@ -592,4 +614,4 @@ module.exports = {
   ProductVariants,
   Entitlements,
   Notifications,
-};
+});

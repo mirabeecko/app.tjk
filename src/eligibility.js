@@ -185,9 +185,14 @@ async function membershipEligibility(m) {
 // Vybere správnou variantu (nikdy neobě ceny) a vrátí autorizovanou cenu.
 async function resolveVariant(productId, st) {
   const variants = await D.ProductVariants.listForProduct(productId);
+  return pickVariant(variants, st);
+}
+
+/** Čistý výběr varianty z už načteného seznamu (bez dotazu do DB). */
+function pickVariant(variants, st) {
   const now = new Date().toISOString();
   const audience = st.isMember ? 'MEMBER' : 'PUBLIC';
-  const match = variants.find((v) => {
+  const match = (variants || []).find((v) => {
     if (!v.active) return false;
     if (v.audience !== audience) return false;
     if (v.age_type && v.age_type !== 'ANY' && v.age_type !== st.ageType) return false;
@@ -241,16 +246,18 @@ async function productEligibility(m, productCode) {
 }
 
 // ── Sjednocené požadavky (UI/status): dokumenty členství + služeb uživatele ──
-async function requiredDocUnion(m) {
-  const st = await userState(m);
+async function requiredDocUnion(m, stIn) {
+  const st = stIn || await userState(m);
   const intent = intentOf(m);
   // Dokumenty členství jen tehdy, když uživatel o členství skutečně usiluje
   // (intent='clenstvi') nebo už členem je. „Vstup“ = jen dokumenty služeb.
   const user = new Set(intent === 'clenstvi' || st.isMember ? await withoutRetired(MEMBERSHIP_DOCS) : []);
   const guardian = new Set();
   const prods = await D.Products.listActive();
+  // Všechny varianty jedním dotazem (dřív dotaz pro každý produkt = N+1).
+  const variantsByProduct = await D.ProductVariants.listAllByProduct();
   for (const p of prods) {
-    const v = await resolveVariant(p.id, st);
+    const v = pickVariant(variantsByProduct.get(p.id), st);
     if (!v) continue;
     const docs = D.ProductVariants.parseDocs(v);
     for (const k of await withoutRetired(docs.userDocs)) user.add(k);
@@ -292,6 +299,7 @@ module.exports = {
   membershipEligibility,
   productEligibility,
   resolveVariant,
+  pickVariant,
   signedDocKeysPublic: signedDocKeys,
   requiredDocUnion,
   missingAllDocs,

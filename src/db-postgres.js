@@ -31,6 +31,9 @@ const pool = new Pool({
 // eslint-disable-next-line no-console
 pool.on('error', (err) => console.error('[pg] chyba idle klienta:', err.message));
 
+// Měření skutečných dotazů (jen s QUERY_LOG=1, jinak nulová režie).
+if (process.env.QUERY_LOG) require('./reqcache').instrumentPool(pool);
+
 // ? → $1..$n (parametry SQLite stylu → pg styl)
 function toPg(sql) {
   let i = 0;
@@ -162,19 +165,25 @@ const DocVersions = {
     return { id, docKey, version, title, contentHash: hash, effectiveFrom };
   },
   async latest(docKey) {
-    return raw.get(
-      `SELECT * FROM ${T('doc_versions')} WHERE doc_key = $1 ORDER BY version DESC LIMIT 1`,
-      [docKey]
+    // Dřív jeden dotaz na každý klíč (13× za request). Nyní jeden dotaz na
+    // VŠECHNY klíče (latestMap) + cache v rámci requestu (reqcache.js).
+    const map = await this.latestMap();
+    return map.get(docKey) || null;
+  },
+  /** Nejnovější verze pro KAŽDÝ dokument jedním dotazem (Map: doc_key → řádek). */
+  async latestMap() {
+    const rows = await raw.all(
+      `SELECT dv.* FROM ${T('doc_versions')} dv
+        WHERE dv.version = (
+          SELECT MAX(v2.version) FROM ${T('doc_versions')} v2 WHERE v2.doc_key = dv.doc_key
+        )`
     );
+    const map = new Map();
+    for (const r of rows) map.set(r.doc_key, r);
+    return map;
   },
   async latestAll() {
-    const keys = await raw.all(`SELECT DISTINCT doc_key FROM ${T('doc_versions')}`);
-    const out = [];
-    for (const k of keys) {
-      const latest = await this.latest(k.doc_key);
-      if (latest) out.push(latest);
-    }
-    return out;
+    return [...(await this.latestMap()).values()];
   },
   async getById(id) {
     return raw.get(`SELECT * FROM ${T('doc_versions')} WHERE id = $1`, [id]);
@@ -331,6 +340,18 @@ const ProductVariants = {
       `SELECT * FROM ${T('product_variants')} WHERE product_id = $1 ORDER BY sort_order, price_czk`,
       [productId]
     );
+  },
+  /** Všechny varianty všech produktů jedním dotazem (Map: product_id → pole). */
+  async listAllByProduct() {
+    const rows = await raw.all(
+      `SELECT * FROM ${T('product_variants')} ORDER BY product_id, sort_order, price_czk`
+    );
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.product_id)) map.set(r.product_id, []);
+      map.get(r.product_id).push(r);
+    }
+    return map;
   },
   async getById(id) {
     return raw.get(`SELECT * FROM ${T('product_variants')} WHERE id = $1`, [id]);
@@ -623,7 +644,9 @@ const Notifications = {
   },
 };
 
-module.exports = {
+// Čtení se v rámci jednoho requestu cachuje (reqcache) — databáze je daleko,
+// každý ušetřený dotaz je znát. Cache se sama zahodí při jakémkoli zápisu.
+module.exports = require('./reqcache').wrapModule({
   pool,
   raw,
   uuid,
@@ -644,4 +667,4 @@ module.exports = {
   ProductVariants,
   Entitlements,
   Notifications,
-};
+});

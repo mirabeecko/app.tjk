@@ -1,7 +1,7 @@
 // sw.js — Service Worker: app shell cache + offline režim pro členskou kartu a provozní řád.
 'use strict';
 
-const CACHE = 'airbag-v40';
+const CACHE = 'airbag-v41';
 const SHELL = [
   '/',
   '/index.html',

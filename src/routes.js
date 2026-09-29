@@ -567,20 +567,29 @@ router.post('/logout', asyncRoute(async (req, res) => {
 // ---------- přihlášený: stav člena ----------
 router.get('/me', A.requireMember, asyncRoute(async (req, res) => {
   const m = req.member;
-  const consents = await D.Consents.listForMember(m.id);
-  const paymentsList = await D.Payments.listForMember(m.id);
-  const entitlementsList = await D.Entitlements.listForMember(m.id);
-  const est = await E.userState(m);
+  // Nezávislá čtení v JEDNOM kole (dřív čtyři dotazy v sérii za sebou).
+  const [consents, paymentsList, entitlementsList, est] = await Promise.all([
+    D.Consents.listForMember(m.id),
+    D.Payments.listForMember(m.id),
+    D.Entitlements.listForMember(m.id),
+    E.userState(m),
+  ]);
   const kind = est.isMember ? 'clen' : 'neclen';
-  const ready = await R.readiness(m);
-  const entitlements = [];
-  for (const e of entitlementsList) {
-    const prod = await D.Products.getById(e.product_id);
-    entitlements.push({
+  // Stav uživatele předáváme dál — uvnitř se počítá znovu (3× za request).
+  const ready = await R.readiness(m, { state: est });
+  // Názvy produktů jedním dotazem (dřív dotaz pro každé oprávnění zvlášť = N+1).
+  // POZOR: sqlite driver vrací pole synchronně, postgres Promise → await stačí,
+  // ale .catch() na synchronní hodnotě neexistuje (proto try/catch).
+  let allProducts = [];
+  try { allProducts = (await D.Products.listAll()) || []; } catch { allProducts = []; }
+  const productById = new Map(allProducts.map((p) => [p.id, p]));
+  const entitlements = entitlementsList.map((e) => {
+    const prod = productById.get(e.product_id);
+    return {
       id: e.id, productCode: prod ? prod.code : null, productName: prod ? prod.name : null,
       validFrom: e.valid_from, validUntil: e.valid_until,
-    });
-  }
+    };
+  });
   res.json({
     member: publicMember(m),
     // segmentace uživatele (spec): věk + členství + zástupce
