@@ -9,7 +9,7 @@ async function viewLanding() {
   const benefitsTitle = el('h2', { text: 'Členské výhody' });
   const benefitsGrid = el('div', { class: 'benefit-grid' });
   try {
-    const { facilities } = await API.get('/facilities');
+    const facilities = await loadFacilities();
     for (const f of facilities) {
       benefitsGrid.append(el('div', { class: 'benefit-card' }, [
         el('span', { class: 'benefit-icon' }, [ico(f.icon || 'ticket')]),

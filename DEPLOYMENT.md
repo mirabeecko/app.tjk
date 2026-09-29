@@ -87,8 +87,38 @@ cd /tmp/deploy-app && vercel --prod
 Rychlá kontrola konzistence před nasazením (kromě `npm test`):
 ```bash
 for f in $(find src -name '*.js'); do node --check "$f" || echo "SYNTAX: $f"; done
-DB_DRIVER=postgres SEED_DEMO=false node -e "require('./src/seed').seed().then(()=>console.log('seed OK')).catch(e=>{console.error('SEED CHYBA:',e.message);process.exit(1)})"
+# POZOR: bez `-r dotenv/config` skript spadne na „vyžaduje DATABASE_URL“ —
+# `node -e` sám .env nenačítá (načítá ho až src/app.js).
+DB_DRIVER=postgres SEED_DEMO=false node -r dotenv/config -e "require('./src/seed').seed().then(()=>console.log('seed OK')).catch(e=>{console.error('SEED CHYBA:',e.message);process.exit(1)})"
 ```
+Seed na produkci trvá ~0,5 s i když se přeskočí (otisk v `app_meta` sedí) —
+běží jednou na instanci, takže je to součást studeného startu.
+
+### Kolik dotazů do DB jeden endpoint dělá (měření výkonu)
+
+```bash
+QUERY_LOG=1 DB_DRIVER=sqlite PORT=4312 node server.js   # vypíše na konci každého requestu
+# [db] GET /me → dotazyDB=13 volaniMetod=34 zCache=28 zápisy=0 | all×7 get×6
+REQCACHE=off QUERY_LOG=1 ... node server.js             # pro srovnání „před optimalizací“
+```
+`dotazyDB` = skutečné dotazy do databáze (počítá se na úrovni `pool.query` /
+provedení SQL), `zCache` = kolik čtení odpadlo díky cache requestu. V produkci
+měření vypnuté (bez `QUERY_LOG` se nic neobaluje, nulová režie).
+
+**Výkonové zásady, které se vyplatilo dodržet** (2026-09-29, `/api/me` 40 → 13 dotazů):
+- funkce musí běžet ve stejné oblasti jako databáze (`vercel.json` → `regions: ["fra1"]`;
+  v `x-vercel-id` musí být `fra1::fra1`, ne `fra1::iad1`)
+- čtení se v rámci requestu cachuje (`src/reqcache.js`, AsyncLocalStorage) —
+  nová metoda repozitáře patří do `READ_METHODS`, jinak se chová jako zápis
+  a cache zbytečně maže (přesně to dělal `ProductVariants.listForProduct`)
+- `DocVersions.latest()` čte z `latestMap()` (jeden dotaz na všechny dokumenty);
+  volat `latest()` v cyklu je proto v pořádku
+- **cache hlavičky statiky patří do `vercel.json`**, ne do `express.static` —
+  `public/` servíruje Vercel sám a `setHeaders` v Expressu se pro něj neuplatní
+- statika s `?v=NN` má `immutable` (rok); HTML app shell zůstává `no-store`
+- vlastní fonty v `public/fonts` (dřív Google Fonts blokovaly vykreslení ~600 ms)
+- při změně assetů zvednout `?v=NN` v `index.html`, `js/app.js` (SKRIPT_ADMIN/
+  DOZOR) **i v `sw.js`** (SHELL seznam i `CACHE`) — v `sw.js` se to snadno zapomene
 
 ### Když produkce vrací 500 a v logu nic není
 

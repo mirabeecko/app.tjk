@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=41';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=41';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=42';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=42';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -277,7 +277,10 @@ function setupMenu() {
 
 window.addEventListener('hashchange', render);
 window.addEventListener('DOMContentLoaded', async () => {
-  await refreshMe().catch(() => {});
+  // /me a /facilities běží SOUBĚŽNĚ (dřív na sebe čekaly v sérii).
+  const mePromise = refreshMe().catch(() => {});
+  loadFacilities().catch(() => {});
   setupMenu();
+  await mePromise;
   render();
 });

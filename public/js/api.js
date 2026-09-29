@@ -47,12 +47,39 @@ async function refreshMe({ force = false } = {}) {
     if (!meInFlight) {
       meInFlight = API.get('/me')
         .then((res) => { me = res; meLoadedAt = Date.now(); return me; })
-        .catch(() => { me = null; return null; })
+        // Neúspěch (nepřihlášený = 401) se MUSÍ taky započítat do meLoadedAt.
+        // Dřív se čas uložil jen při úspěchu, takže se /me hned volalo znovu
+        // (bootstrap i router) — na produkci to byly DVA requesty na úvodní
+        // stránce pro každého nepřihlášeného návštěvníka.
+        .catch(() => { me = null; meLoadedAt = Date.now(); return null; })
         .finally(() => { meInFlight = null; });
     }
     return meInFlight;
   }
   return me;
+}
+
+// Zařízení (airbag…) potřebuje úvodní stránka. Přednačítá se SOUČASNĚ s /me,
+// aby požadavky na sebe nečekaly v sérii (dřív /api/facilities startovalo až
+// po dokončení /me = dalších ~150 ms na první obrazovce).
+let facilitiesCache = null;
+let facilitiesInFlight = null;
+const FACILITIES_TTL_MS = 30000;
+function loadFacilities({ force = false } = {}) {
+  if (!force && facilitiesCache && (Date.now() - facilitiesCache.at) < FACILITIES_TTL_MS) {
+    return Promise.resolve(facilitiesCache.list);
+  }
+  if (!facilitiesInFlight) {
+    facilitiesInFlight = API.get('/facilities')
+      .then((r) => {
+        const list = (r && r.facilities) || [];
+        facilitiesCache = { at: Date.now(), list };
+        return list;
+      })
+      .catch(() => (facilitiesCache ? facilitiesCache.list : []))
+      .finally(() => { facilitiesInFlight = null; });
+  }
+  return facilitiesInFlight;
 }
 
 function isLoggedIn() { return !!me; }
