@@ -8,6 +8,7 @@ const QRCode = require('qrcode');
 const D = require('./db');
 const A = require('./auth');
 const mailer = require('./mailer');
+const telegram = require('./telegram');
 const GAuth = require('./google-auth');
 const Pwd = require('./password');
 const payments = require('./payments');
@@ -255,6 +256,10 @@ router.post('/register', registerLimiter, asyncRoute(async (req, res) => {
 
   // asynchronní sync do Supabase evidence (neblokuje odpověď)
   S.upsertMember(member).catch((e) => console.log('[supabase-sync] CHYBA', e.message));
+
+  // Notifikace provozovateli na Telegram — NEČEKÁ se na ni (registrace nesmí
+  // viset na cizí službě) a případná chyba se jen zaloguje (viz src/telegram.js).
+  telegram.notifyRegistration(member, { intent, guardianRequired });
 
   res.json({
     member: publicMember(member),
