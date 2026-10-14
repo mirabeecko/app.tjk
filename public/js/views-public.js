@@ -345,7 +345,7 @@ async function viewRegister() {
             el('input', { type: 'file', id: 'reg-photo', name: 'photoFile', accept: 'image/*', style: 'display:none' }),
             el('div', { id: 'reg-photo-preview', class: 'photo-preview', text: 'Vybrat fotografii' }),
             el('button', { type: 'button', class: 'btn small', text: 'Nahrát fotografii', onclick: () => $('#reg-photo').click() }),
-            el('p', { class: 'muted small', text: 'Nahrajte portrétovou fotku (JPG/PNG/WebP, max 3 MB). Požaduje se při registraci.' }),
+            el('p', { class: 'muted small', text: 'Nahrajte portrétovou fotku (JPG/PNG/WebP, max 3 MB). Fotku v aplikaci automaticky zmenšíme.' }),
           ]),
         ]),
       ]),
@@ -422,30 +422,82 @@ async function viewRegister() {
   birthInput.addEventListener('change', updateAgeCategory);
   birthInput.addEventListener('input', updateAgeCategory);
 
-  // Fotografie: čtení souboru → data-URL + preview
+  // Fotografie: čtení souboru → zmenšení v prohlížeči → data-URL + preview.
+  // PROČ zmenšovat: telefon vyfotí 2–6 MB a base64 posílá +33 % navíc; server
+  // (i Vercel) má strop na velikost těla, takže RAW fotka z telefonu vždy
+  // skončila chybou. Menší fotka zároveň zrychlí registraci i načtení profilu.
   let photoData = '';
+  const PHOTO_MAX_SIDE = 1600;             // delší strana obrázku (px)
+  const PHOTO_MAX_BYTES = 3 * 1024 * 1024; // stejný strop, jaký kontroluje server
+  const PHOTO_STEPS = [[PHOTO_MAX_SIDE, 0.82], [1200, 0.72], [900, 0.62], [700, 0.5]];
+
+  function nactiObrazek(dataUrl) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Obrázek se nepodařilo načíst — zkuste jiný soubor.'));
+      // data: URL záměrně (CSP povoluje img-src 'self' data:, ale ne blob:)
+      img.src = dataUrl;
+    });
+  }
+
+  function prekresli(img, maxSide, quality) {
+    const sw = img.naturalWidth || img.width;
+    const sh = img.naturalHeight || img.height;
+    const scale = Math.min(1, maxSide / Math.max(sw, sh));
+    const w = Math.max(1, Math.round(sw * scale));
+    const h = Math.max(1, Math.round(sh * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';   // JPEG neumí průhlednost — bez podkladu by zčernala
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL('image/jpeg', quality);
+  }
+
+  async function zmensiFotku(file) {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Soubor se nepodařilo přečíst — zkuste jiný.'));
+      reader.readAsDataURL(file);
+    });
+    const img = await nactiObrazek(dataUrl);
+    let nejlepsi = '';
+    for (const [maxSide, quality] of PHOTO_STEPS) {
+      const out = prekresli(img, maxSide, quality);
+      if (!nejlepsi || out.length < nejlepsi.length) nejlepsi = out;
+      if (out.length <= PHOTO_MAX_BYTES) return out;
+    }
+    if (nejlepsi.length > PHOTO_MAX_BYTES) {
+      throw new Error('Fotografii se nepodařilo zmenšit pod 3 MB — vyberte prosím jinou.');
+    }
+    return nejlepsi;
+  }
+
   const photoInput = $('#reg-photo');
   const photoPreview = $('#reg-photo-preview');
   if (photoInput && photoPreview) {
-    photoInput.addEventListener('change', (ev) => {
+    photoInput.addEventListener('change', async (ev) => {
       const file = (ev.target.files || [])[0];
       if (!file) return;
       if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.type)) {
         toast('Vyberte obrázek (JPG/PNG/WebP)', true);
         return;
       }
-      if (file.size > 3 * 1024 * 1024) {
-        toast('Fotografie je příliš velká (max 3 MB)', true);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        photoData = reader.result;
+      try {
+        photoData = await zmensiFotku(file);
         photoPreview.style.backgroundImage = `url(${photoData})`;
         photoPreview.classList.add('has-photo');
         photoPreview.textContent = '';
-      };
-      reader.readAsDataURL(file);
+      } catch (err) {
+        photoData = '';
+        photoPreview.style.backgroundImage = '';
+        photoPreview.classList.remove('has-photo');
+        toast(err.message, true);
+      }
     });
   }
 

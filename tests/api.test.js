@@ -875,6 +875,34 @@ async function main() {
   const vRestored = await api('GET', '/api/documents/verify');
   check('Po vrácení znění je kontrola opět v pořádku', vRestored.verdict === 'OK', JSON.stringify(vRestored.problems));
 
+  // ---------- TOK K: registrace s fotkou z telefonu (velikost těla requestu) ----------
+  // REGRESE (2026-10-15): limit těla requestu byl 1 MB, ale fotografii posílá
+  // klient jako data-URL (base64 = +33 %). Každá fotka z telefonu (1–4 MB) proto
+  // spadla na PayloadTooLargeError a uživatel viděl „Došlo k neočekávané chybě
+  // serveru.“ Test hlídá, že velká fotka projde a že příliš velké tělo vrátí
+  // srozumitelnou hlášku (413), ne falešnou 500.
+  console.log('\n=== TOK K: registrace s velkou fotkou ===\n');
+
+  const foto2MB = 'data:image/jpeg;base64,' + 'A'.repeat(2 * 1024 * 1024);
+  const regVelkaFotka = await api('POST', '/api/register', {
+    firstName: 'Test', lastName: 'VelkaFotka', birthDate: '1991-02-02',
+    street: 'Horni 12', city: 'Krupka', zip: '417 41',
+    email: `velkafotka${Date.now()}@test.cz`, photo: foto2MB,
+  }, { raw: true });
+  check('Registrace s fotkou 2 MB projde (tělo requestu > 1 MB)',
+    regVelkaFotka.status === 200 && !!regVelkaFotka.data.member,
+    `HTTP ${regVelkaFotka.status} ${JSON.stringify((regVelkaFotka.data && regVelkaFotka.data.error) || '')}`);
+
+  const foto6MB = 'data:image/jpeg;base64,' + 'A'.repeat(6 * 1024 * 1024);
+  const regObriFotka = await api('POST', '/api/register', {
+    firstName: 'Test', lastName: 'ObriFotka', birthDate: '1991-02-02',
+    street: 'Horni 12', city: 'Krupka', zip: '417 41',
+    email: `obrifotka${Date.now()}@test.cz`, photo: foto6MB,
+  }, { raw: true });
+  check('Příliš velké tělo → 413 s jasnou hláškou (ne 500 „neočekávaná chyba“)',
+    regObriFotka.status === 413 && /velká/i.test((regObriFotka.data && regObriFotka.data.message) || ''),
+    `HTTP ${regObriFotka.status} ${JSON.stringify(regObriFotka.data)}`);
+
   // úklid testovacích členů po běhu (lokální DB) — evidence se nezanáší
   // (sync modul navíc @test.cz emaily do Supabase nikdy neodesílá)
   const dClean = new Database(path.join(__dirname, '..', 'data', 'airbag.db'));

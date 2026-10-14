@@ -100,7 +100,13 @@ function buildApp() {
   // montujeme ho PŘED globální express.json (jinak by byl stream už přečtený).
   app.use('/api', routes.webhookRouter);
 
-  app.use(express.json({ limit: '1mb' }));
+  // POZOR: limit těla MUSÍ unést fotku z registrace. Klient posílá fotografii
+  // jako data-URL (base64 = +33 % k velikosti souboru) a registrace povoluje
+  // fotku do 3 MB → tělo requestu je až ~4 MB. S limitem '1mb' každá fotka
+  // z telefonu (1–4 MB) spadla na PayloadTooLargeError a uživatel viděl
+  // „Došlo k neočekávané chybě serveru.“ (Vercel sám drží strop 4,5 MB, proto
+  // se fotka v prohlížeči zmenšuje na ~200–400 kB — viz views-public.js.)
+  app.use(express.json({ limit: '4mb' }));
 
   app.use('/api', routes);
 
@@ -149,6 +155,23 @@ function buildApp() {
   app.use((err, req, res, next) => {
     // eslint-disable-next-line no-console
     console.error('CHYBA:', err);
+    // Chyby z body-parseru (příliš velké tělo / rozbitý JSON) NEJSOU chyby
+    // serveru — hlásit je jako 500 s „neočekávanou chybou“ je lež, která
+    // uživatele i vývojáře posílá hledat problém úplně jinam (stalo se
+    // u registrace s fotkou nad limit). Vracíme skutečnou příčinu.
+    const status = Number(err && (err.status || err.statusCode)) || 500;
+    if (status === 413 || (err && err.type === 'entity.too.large')) {
+      return res.status(413).json({
+        error: 'PRILIS_VELKE',
+        message: 'Fotografie je příliš velká — vyberte prosím menší obrázek (max 3 MB).',
+      });
+    }
+    if (err && err.type === 'entity.parse.failed') {
+      return res.status(400).json({
+        error: 'VALIDACE',
+        message: 'Data se nepodařilo přečíst — zkuste formulář odeslat znovu.',
+      });
+    }
     res.status(500).json({ error: 'SERVER_CHYBA', message: 'Došlo k neočekávané chybě serveru.' });
   });
 
