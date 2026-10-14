@@ -1759,3 +1759,69 @@ body.role-superadmin .card.primary .btn.accent { background: #1A0208; color: var
   .rail-nav .nav-me-name { max-width: none; flex: 1 1 auto; }
   .rail-nav .nav-me-role { display: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   SOUHLASY: kompaktní seznam dokumentů + náhled (2026-10-15)
+   Každý dokument byl velká karta s rozbaleným HOLÝM textem markdownu →
+   stránka vypadala jako hromada nečitelného textu. Nyní je to jeden
+   krátký seznam (jeden dokument = jeden řádek) a plné znění se otevírá
+   v náhledu s naformátovaným textem.
+   ══════════════════════════════════════════════════════════════ */
+.doc-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-top: 1px solid var(--border); }
+.doc-row-main { display: flex; align-items: flex-start; gap: 11px; flex: 1 1 auto; min-width: 0; cursor: pointer; }
+.doc-row-main input { margin-top: 2px; width: 19px; height: 19px; flex: none; cursor: pointer; accent-color: var(--primary); }
+.doc-row-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.doc-row-title { font-weight: 700; font-size: 0.92rem; line-height: 1.25; }
+.doc-row-meta { font-size: 0.74rem; color: var(--text-2); }
+.doc-row.checked { background: var(--accent-soft); border-radius: var(--radius-sm); }
+.doc-row.checked .doc-row-title { color: var(--accent-deep); }
+.btn.tiny { padding: 6px 11px; font-size: 0.75rem; border-radius: 9px; width: auto; margin-top: 0; flex: none; }
+.confirm-check { margin-top: 14px; }
+.confirm-check .check-title { font-weight: 700; font-size: 0.9rem; }
+.check.err { border-color: var(--danger-deep); background: var(--danger-soft); }
+
+/* náhled dokumentu (modal) */
+body.modal-open { overflow: hidden; }
+.doc-modal {
+  position: fixed; inset: 0; z-index: 80; padding: 18px;
+  background: rgba(10, 18, 32, 0.62);
+  display: flex; align-items: center; justify-content: center;
+}
+.doc-modal-card {
+  background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+  width: min(780px, 100%); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+}
+.doc-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.doc-modal-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.doc-modal-title strong { font-size: 0.98rem; line-height: 1.25; }
+.doc-modal-actions { display: flex; gap: 8px; flex: none; }
+.doc-modal-note { padding: 10px 18px 16px; margin: 0; }
+
+/* naformátovaný text dokumentu (výstup md.js) */
+.doc-html { padding: 16px 18px; overflow-y: auto; font-size: 0.92rem; line-height: 1.62; color: var(--text-0); }
+.doc-html h2 { font-family: var(--font-display); font-size: 1.16rem; margin: 4px 0 10px; }
+.doc-html h3 { font-size: 1rem; margin: 18px 0 6px; }
+.doc-html h4 { font-size: 0.92rem; margin: 14px 0 4px; }
+.doc-html p { margin: 0 0 10px; }
+.doc-html ul, .doc-html ol { margin: 0 0 10px; padding-left: 22px; }
+.doc-html li { margin: 3px 0; }
+.doc-html hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+.doc-html blockquote { margin: 0 0 10px; padding: 8px 12px; border-left: 3px solid var(--primary); background: var(--bg-2); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.doc-html code { font-family: var(--font-mono); font-size: 0.85em; background: var(--bg-2); padding: 1px 5px; border-radius: 5px; }
+.doc-html a { color: var(--primary); }
+.doc-table-wrap { overflow-x: auto; margin: 0 0 12px; }
+.doc-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.doc-table th, .doc-table td { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; }
+.doc-table th { background: var(--bg-2); font-weight: 750; }
+.doc-html blockquote > *:last-child { margin-bottom: 0; }
+
+/* tisk z náhledu = vytiskne se JEN dokument (ne celá aplikace) */
+@media print {
+  body.modal-open > *:not(#doc-modal) { display: none !important; }
+  #doc-modal { position: static; background: none; padding: 0; display: block; }
+  .doc-modal-card { box-shadow: none; border: 0; max-height: none; width: 100%; }
+  .doc-modal-actions, .doc-modal-note { display: none !important; }
+  .doc-html { overflow: visible; padding: 0; font-size: 11pt; color: #000; }
+}
+

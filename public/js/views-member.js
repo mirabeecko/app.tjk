@@ -51,41 +51,63 @@ async function viewConsent() {
   try { const g = await API.get('/consent-groups'); groups = g.groups || []; guard = g.guardian || null; }
   catch (e) { root.append(el('div', { class: 'alert err', text: e.message })); return; }
 
-  const allChecks = [];
-  const submitBtns = [];
-  let totalMissing = 0;
-
-  groups.forEach((group, gi) => {
+  // SOUHLASY JAKO JEDEN KRÁTKÝ SEZNAM
+  // Tentýž dokument bývá požadovaný členstvím I službou (provozní řád, GDPR) —
+  // v seznamu proto má být JEDNOU, jen s poznámkou, čeho se týká. Uživatel pak
+  // nevidí „hromadu dokumentů“, ale 5 položek, a plné znění se otevírá až na
+  // kliknutí (náhled s naformátovaným textem).
+  const docsList = [];
+  const docsIndex = {};
+  groups.forEach((group) => {
     if (group.key === 'guardian') return; // zástupce se řeší zvlášť níže
-    const missing = group.docs.filter((d) => !d.signed).length;
-    totalMissing += missing;
-    const head = el('div', { class: 'list-row' }, [
-      el('span', {}, [
-        el('strong', { text: `${gi + 1}. ${group.title}` }),
-        el('span', { class: 'small muted', text: missing ? ` · ${missing} zbývá` : '' }),
-      ]),
-      el('span', { class: 'tag ' + (missing ? 'warn' : 'ok'), text: missing ? `${missing} zbývá` : 'Hotovo' }),
-    ]);
-    const card = el('div', { class: 'card' }, [head]);
+    const label = group.key.startsWith('service:') ? 'vstup na matraci' : 'členství';
     for (const d of group.docs) {
-      const doc = docsMap[d.docKey] || {};
-      const check = el('label', { class: `check ${d.signed ? 'checked' : ''}` }, [
-        el('input', { type: 'checkbox', name: `doc-${d.docKey}`, value: d.docKey, checked: d.signed, disabled: d.signed }),
-        el('span', {}, [
-          el('span', { class: 'check-title', text: doc.title || d.docKey + (d.signed ? ' ✓' : '') }),
-          el('span', { class: 'check-desc', text: `verze ${d.version}${d.signed ? ' · podepsáno' : ''}` }),
-          el('details', { class: 'doc-details' }, [
-            el('summary', { text: 'Zobrazit plné znění' }),
-            el('div', { class: 'doc-body', text: doc.content || '(text není dostupný offline)' }),
-          ]),
-        ]),
-      ]);
-      check.addEventListener('change', () => { if (!$('input', check).disabled) check.classList.toggle('checked', $('input', check).checked); });
-      card.append(check);
-      if (!d.signed) allChecks.push(check);
+      if (!docsIndex[d.docKey]) {
+        docsIndex[d.docKey] = { docKey: d.docKey, version: d.version, signed: !!d.signed, labels: [] };
+        docsList.push(docsIndex[d.docKey]);
+      }
+      const item = docsIndex[d.docKey];
+      if (!item.labels.includes(label)) item.labels.push(label);
+      if (d.signed) item.signed = true;
     }
-    root.append(card);
   });
+
+  const allChecks = [];
+  const chybiVDokumentech = docsList.filter((d) => !d.signed).length;
+  let totalMissing = chybiVDokumentech + (guard ? guard.docs.filter((d) => !d.signed).length : 0);
+
+  const seznam = el('div', { class: 'card' }, [
+    el('div', { class: 'list-row' }, [
+      el('span', {}, [
+        el('strong', { text: 'Co potvrzujete' }),
+        el('span', { class: 'small muted', text: ` · ${docsList.length} dokumentů` }),
+      ]),
+      el('span', { class: 'tag ' + (chybiVDokumentech ? 'warn' : 'ok'), text: chybiVDokumentech ? `${chybiVDokumentech} zbývá` : 'Hotovo' }),
+    ]),
+  ]);
+
+  for (const d of docsList) {
+    const doc = docsMap[d.docKey] || {};
+    const radek = el('div', { class: 'doc-row' + (d.signed ? ' checked' : '') }, [
+      el('label', { class: 'doc-row-main' }, [
+        el('input', { type: 'checkbox', name: `doc-${d.docKey}`, value: d.docKey, checked: d.signed, disabled: d.signed }),
+        el('span', { class: 'doc-row-body' }, [
+          el('span', { class: 'doc-row-title', text: doc.title || d.docKey }),
+          el('span', { class: 'doc-row-meta', text: `${d.labels.join(' + ')} · verze ${d.version}${d.signed ? ' · potvrzeno' : ''}` }),
+        ]),
+      ]),
+      el('button', {
+        type: 'button', class: 'btn tiny ghost', text: 'Zobrazit',
+        onclick: () => otevriNahledDokumentu(doc, d),
+      }),
+    ]);
+    const input = $('input', radek);
+    input.addEventListener('change', () => radek.classList.toggle('checked', input.checked));
+    seznam.append(radek);
+    if (!d.signed) allChecks.push(radek);
+  }
+  root.append(seznam);
+
 
   // ZÁSTUPCE — krok
   if (guard) {
@@ -180,21 +202,43 @@ async function viewConsent() {
       } catch (err) { toast(err.message, true); }
       finally { codeBtn.disabled = false; }
     });
+    // Souhrnné potvrzení PŘEČTENÍ: bez něj nelze souhlasy uložit (a tím ani
+    // pokračovat k platbě). Není to formalita — váže se k auditu (kdo, kdy, IP).
+    const confirmBox = el('label', { class: 'check confirm-check' }, [
+      el('input', { type: 'checkbox', id: 'doc-confirm' }),
+      el('span', {}, [
+        el('span', { class: 'check-title', text: 'Potvrzuji, že jsem si všechny dokumenty pečlivě přečetl(a) a rozumím jim.' }),
+      ]),
+    ]);
+    const confirmInput = $('input', confirmBox);
+    confirmInput.addEventListener('change', () => {
+      confirmBox.classList.toggle('checked', confirmInput.checked);
+      confirmBox.classList.remove('err');
+    });
+
     root.append(el('div', { class: 'card' }, [
-      el('h3', { text: 'Potvrzení dokumentů (ověření, že je potvrzujete vy)' }),
+      el('h3', { text: 'Ověření, že dokumenty potvrzujete vy' }),
       el('p', { class: 'muted small', text: 'Potvrzení se ukládá s vaší identitou, časem serveru a IP adresou. Zadejte heslo k účtu — nebo si nechte poslat jednorázový kód na svůj e-mail. Bez ověření dokumenty uložit nelze.' }),
       el('div', { class: 'form-row' }, [passInput, codeInput]),
       el('div', { class: 'row-gap' }, [codeBtn]),
+      confirmBox,
     ]));
     const btn = el('button', { class: 'btn', type: 'button', text: 'Uložit vybrané souhlasy' });
     btn.addEventListener('click', async () => {
       const docKeys = allChecks.filter((c) => $('input', c).checked).map((c) => $('input', c).value);
       if (!docKeys.length) { toast('Zaškrtněte dokumenty, se kterými souhlasíte', true); return; }
+      if (!confirmInput.checked) {
+        confirmBox.classList.add('err');
+        confirmBox.scrollIntoView({ block: 'center' });
+        toast('Potvrďte prosím, že jste si dokumenty přečetl(a) a rozumíte jim — bez toho souhlasy uložit nelze.', true);
+        return;
+      }
       if (!passInput.value && !codeInput.value) {
         toast('Zadejte heslo nebo ověřovací kód z e-mailu — potvrzujete tím, že dokumenty potvrzujete vy osobně.', true);
         return;
       }
       btn.disabled = true; btn.textContent = 'Ukládám potvrzení…';
+
       try {
         const res = await API.post('/consent', {
           docKeys,
@@ -227,6 +271,53 @@ async function viewConsent() {
 
   // DOKLAD O PODPISU: co jsem podepsal(a), s jakým zněním, kdy a odkud + protokol k tisku
   root.append(await signedDocsCard());
+}
+
+/* ---------- NÁHLED DOKUMENTU (naformátovaný text + tisk) ---------- */
+// Dřív se plné znění rozbalovalo přímo v seznamu a vkládalo se jako HOLÝ text
+// (mřížky a hvězdičky markdownu) — seznam pak vypadal jako hromada nečitelného
+// textu. Náhled je proto samostatné okno s naformátovaným textem (md.js)
+// a tlačítkem pro tisk / uložení do PDF.
+function otevriNahledDokumentu(doc, info) {
+  const stary = document.getElementById('doc-modal');
+  if (stary) stary.remove();
+
+  const zavri = () => {
+    const m = document.getElementById('doc-modal');
+    if (m) m.remove();
+    document.body.classList.remove('modal-open');
+  };
+
+  const telo = el('div', { class: 'doc-html' });
+  telo.innerHTML = mdToHtml(doc && doc.content
+    ? doc.content
+    : '(text dokumentu se nepodařilo načíst — zkuste to znovu s připojením k internetu.)');
+
+  const modal = el('div', {
+    id: 'doc-modal', class: 'doc-modal', role: 'dialog', 'aria-modal': 'true',
+    'aria-label': (doc && doc.title) || 'Náhled dokumentu',
+  }, [
+    el('div', { class: 'doc-modal-card' }, [
+      el('div', { class: 'doc-modal-head' }, [
+        el('div', { class: 'doc-modal-title' }, [
+          el('strong', { text: (doc && doc.title) || info.docKey }),
+          el('span', { class: 'small muted', text: `verze ${info.version}${info.labels && info.labels.length ? ' · ' + info.labels.join(' + ') : ''}` }),
+        ]),
+        el('div', { class: 'doc-modal-actions' }, [
+          el('button', { type: 'button', class: 'btn small ghost', text: 'Vytisknout / PDF', onclick: () => window.print() }),
+          el('button', { type: 'button', class: 'btn small', text: 'Zavřít', onclick: zavri }),
+        ]),
+      ]),
+      telo,
+      el('p', { class: 'small muted doc-modal-note', text: 'Potvrzením se uloží otisk (SHA-256) právě tohoto znění — pozdější změna textu v evidenci je proto dohledatelná.' }),
+    ]),
+  ]);
+
+  modal.addEventListener('click', (ev) => { if (ev.target === modal) zavri(); });
+  const naEsc = (ev) => { if (ev.key === 'Escape') { zavri(); document.removeEventListener('keydown', naEsc); } };
+  document.addEventListener('keydown', naEsc);
+  document.body.append(modal);
+  document.body.classList.add('modal-open');
 }
 
 /* ---------- DOKLAD O PODPISU (moje podepsané dokumenty) ---------- */
