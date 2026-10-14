@@ -61,21 +61,30 @@ async function getCentralAdapter() {
 }
 
 // ── 2. Env konfigurace (produkce / Vercel) ─────────────────────────────
+// POZOR: hodnoty přes `.trim()` — klíč vložený do Vercel env s odřádkováním
+// nebo mezerou na konci je pro fetch NEPLATNÁ hlavička a Node pak hlásí jen
+// obecné „fetch failed“, ze kterého se příčina nepozná (přesně to 2026-10-15
+// shodilo ověřovací kódy na produkci).
 const SMTP = {
-  host: process.env.SMTP_HOST || '',
+  host: (process.env.SMTP_HOST || '').trim(),
   port: Number(process.env.SMTP_PORT || 587),
   secure: process.env.SMTP_SECURE === 'true',
-  user: process.env.SMTP_USER || '',
-  pass: process.env.SMTP_PASS || '',
-  from: process.env.SMTP_FROM || 'Tělovýchovná jednota Krupka <noreply@krupka.example>',
+  user: (process.env.SMTP_USER || '').trim(),
+  pass: (process.env.SMTP_PASS || '').trim(),
+  from: (process.env.SMTP_FROM || 'Tělovýchovná jednota Krupka <noreply@krupka.example>').trim(),
 };
 
 const envSmtpEnabled = Boolean(SMTP.host && SMTP.user && SMTP.pass);
 
 // SMTP_PASS je u Resend zároveň API klíč → HTTP cesta má lepší doručitelnost.
-const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.SMTP_PASS || '';
+// Klíč zbavujeme VŠECH bílých znaků: hodnota vložená do Vercel env s odřádkováním
+// (i uprostřed) je pro fetch neplatná hlavička a Node pak hlásí jen obecné
+// „fetch failed“, ze kterého se příčina nepozná.
+const ocistiKlic = (v) => String(v || '').replace(/\s+/g, '');
+const RESEND_API_KEY = ocistiKlic(process.env.RESEND_API_KEY || process.env.SMTP_PASS || '');
 const resendEnabled = Boolean(RESEND_API_KEY);
-const RESEND_FROM = process.env.SMTP_FROM || 'Tělovýchovná jednota Krupka <info@tjkrupka.cz>';
+const RESEND_FROM = (process.env.SMTP_FROM || 'Tělovýchovná jednota Krupka <info@tjkrupka.cz>').trim();
+
 
 // Veřejný stav — routes.js podle něj zobrazuje emailMode.
 const smtpEnabled = centralEnabled || envSmtpEnabled || resendEnabled;
@@ -160,8 +169,13 @@ async function send({ memberId, channel, to, subject, body }) {
       console.log(`[${via} OK] to=${to} subject=${subject}`);
     })
     .catch((err) => {
+      // „fetch failed“ samo o sobě neřekne nic o příčině — ta je v err.cause
+      // (DNS, TLS, neplatná hlavička…). Bez tohoto se chyba doručení nedá
+      // dohledat jinak než hádáním.
+      const cause = err && err.cause ? ` | cause: ${err.cause.code || ''} ${err.cause.message || err.cause}` : '';
+      const via = centralEnabled ? 'central' : (resendEnabled ? 'resend' : (envSmtpEnabled ? 'smtp' : 'stub'));
       // eslint-disable-next-line no-console
-      console.error(`[MAIL CHYBA] to=${to}: ${err.message} (zpráva zůstala v outboxu)`);
+      console.error(`[MAIL CHYBA/${via}] to=${to}: ${err.message}${cause} (zpráva zůstala v outboxu)`);
     });
 
   return msg;
