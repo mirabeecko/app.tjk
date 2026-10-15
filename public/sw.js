@@ -1,21 +1,21 @@
 // sw.js — Service Worker: app shell cache + offline režim pro členskou kartu a provozní řád.
 'use strict';
 
-const CACHE = 'airbag-v45';
+const CACHE = 'airbag-v46';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/fonts.css?v=45',
-  '/css/app.css?v=45',
-  '/js/api.js?v=45',
-  '/js/ui.js?v=45',
-  '/js/czech.js?v=45',
-  '/js/md.js?v=45',
-  '/js/views-public.js?v=45',
-  '/js/views-member.js?v=45',
+  '/css/fonts.css?v=46',
+  '/css/app.css?v=46',
+  '/js/api.js?v=46',
+  '/js/ui.js?v=46',
+  '/js/czech.js?v=46',
+  '/js/md.js?v=46',
+  '/js/views-public.js?v=46',
+  '/js/views-member.js?v=46',
   // views-admin.js / views-dozor.js se načítají LENIVĚ (viz načtiSkript v app.js)
   // → do pre-cache nepatří, jinak by každý stahoval kód, který nepoužije.
-  '/js/app.js?v=45',
+  '/js/app.js?v=46',
   // fonty jsou vlastní (žádná cizí doména) — bez nich by offline režim ztratil písmo
   '/fonts/inter-latin.woff2',
   '/fonts/outfit-latin.woff2',

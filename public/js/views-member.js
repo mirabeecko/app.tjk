@@ -951,6 +951,7 @@ async function viewProfile() {
     return;
   }
   const m = me.member;
+  const p = m; // v této obrazovce se používá `p` (profil) — viz úprava údajů níže
   root.append(el('h1', { text: 'Můj profil' }));
 
   const card = el('div', { class: 'card' }, [
