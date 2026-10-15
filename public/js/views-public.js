@@ -423,59 +423,9 @@ async function viewRegister() {
   birthInput.addEventListener('input', updateAgeCategory);
 
   // Fotografie: čtení souboru → zmenšení v prohlížeči → data-URL + preview.
-  // PROČ zmenšovat: telefon vyfotí 2–6 MB a base64 posílá +33 % navíc; server
-  // (i Vercel) má strop na velikost těla, takže RAW fotka z telefonu vždy
-  // skončila chybou. Menší fotka zároveň zrychlí registraci i načtení profilu.
+  // Zmenšování (zmensiFotku) je v ui.js, protože ho používá i úprava profilu.
   let photoData = '';
-  const PHOTO_MAX_SIDE = 1600;             // delší strana obrázku (px)
-  const PHOTO_MAX_BYTES = 3 * 1024 * 1024; // stejný strop, jaký kontroluje server
-  const PHOTO_STEPS = [[PHOTO_MAX_SIDE, 0.82], [1200, 0.72], [900, 0.62], [700, 0.5]];
 
-  function nactiObrazek(dataUrl) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('Obrázek se nepodařilo načíst — zkuste jiný soubor.'));
-      // data: URL záměrně (CSP povoluje img-src 'self' data:, ale ne blob:)
-      img.src = dataUrl;
-    });
-  }
-
-  function prekresli(img, maxSide, quality) {
-    const sw = img.naturalWidth || img.width;
-    const sh = img.naturalHeight || img.height;
-    const scale = Math.min(1, maxSide / Math.max(sw, sh));
-    const w = Math.max(1, Math.round(sw * scale));
-    const h = Math.max(1, Math.round(sh * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#fff';   // JPEG neumí průhlednost — bez podkladu by zčernala
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return canvas.toDataURL('image/jpeg', quality);
-  }
-
-  async function zmensiFotku(file) {
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Soubor se nepodařilo přečíst — zkuste jiný.'));
-      reader.readAsDataURL(file);
-    });
-    const img = await nactiObrazek(dataUrl);
-    let nejlepsi = '';
-    for (const [maxSide, quality] of PHOTO_STEPS) {
-      const out = prekresli(img, maxSide, quality);
-      if (!nejlepsi || out.length < nejlepsi.length) nejlepsi = out;
-      if (out.length <= PHOTO_MAX_BYTES) return out;
-    }
-    if (nejlepsi.length > PHOTO_MAX_BYTES) {
-      throw new Error('Fotografii se nepodařilo zmenšit pod 3 MB — vyberte prosím jinou.');
-    }
-    return nejlepsi;
-  }
 
   const photoInput = $('#reg-photo');
   const photoPreview = $('#reg-photo-preview');

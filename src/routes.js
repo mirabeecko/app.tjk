@@ -100,6 +100,9 @@ function publicMember(m) {
     birthDate: m.birth_date,
     email: m.email,
     phone: m.phone,
+    street: m.street,
+    city: m.city,
+    zip: m.zip,
     membershipType: m.membership_type,
     membershipKind: m.membership_kind,
     gender: m.gender,
@@ -845,6 +848,186 @@ router.post('/member/entry-pin', A.requireMember, asyncRoute(async (req, res) =>
     entryPinSet: !!updated.entry_pin_hash,
     entryPinSetAt: updated.entry_pin_set_at,
     note: 'PIN zná jen účastník. U vstupu jej zadá osobně dozoru; bez správného PINu aplikace vstup nepovolí.',
+  });
+}));
+
+// ---------- ÚPRAVA VLASTNÍCH ÚDAJŮ (samoobsluha člena) ----------
+// Překlep v telefonu nebo stěhování se dřív nedalo opravit vůbec — člen musel
+// psát správci. Kontaktní a adresní údaje si proto spravuje sám.
+// Identifikační údaje (jméno, příjmení, datum narození) mění jen S OVĚŘENÍM
+// (heslo účtu nebo kód na e-mail) — mění totiž kategorii členství a právní stav
+// (nezletilý). E-mail je přihlašovací identita → mění ho správce.
+router.post('/me/profile', A.requireMember, asyncRoute(async (req, res) => {
+  const m = req.member;
+  const b = req.body || {};
+  const zmeny = {};
+  const popis = [];
+
+  if (b.phone !== undefined) {
+    const tel = String(b.phone || '').trim();
+    if (tel && !/^[+0-9][0-9 ()-]{5,19}$/.test(tel)) {
+      return res.status(400).json({ error: 'VALIDACE', message: 'Telefon je ve špatném formátu (např. +420 777 123 456).' });
+    }
+    if (tel !== (m.phone || '')) { zmeny.phone = tel; popis.push('telefon'); }
+  }
+
+  if (b.street !== undefined || b.city !== undefined || b.zip !== undefined) {
+    const street = String(b.street !== undefined ? b.street : (m.street || '')).trim();
+    const city = String(b.city !== undefined ? b.city : (m.city || '')).trim();
+    const zip = String(b.zip !== undefined ? b.zip : (m.zip || '')).trim();
+    if (street.length < 2 || city.length < 2) {
+      return res.status(400).json({ error: 'VALIDACE', message: 'Ulice a město musí mít alespoň 2 znaky.' });
+    }
+    if (!/^\d{3}\s?\d{2}$/.test(zip)) {
+      return res.status(400).json({ error: 'VALIDACE', message: 'PSČ zadejte jako 5 číslic (např. 417 41).' });
+    }
+    if (street !== (m.street || '')) zmeny.street = street;
+    if (city !== (m.city || '')) zmeny.city = city;
+    if (zip !== (m.zip || '')) zmeny.zip = zip;
+    if (zmeny.street !== undefined || zmeny.city !== undefined || zmeny.zip !== undefined) popis.push('adresa');
+  }
+
+  if (b.gender !== undefined) {
+    const g = String(b.gender || '').trim() || null;
+    if (g && !['muz', 'zena'].includes(g)) {
+      return res.status(400).json({ error: 'VALIDACE', message: 'Pohlaví musí být muž nebo žena.' });
+    }
+    if (g !== (m.gender || null)) { zmeny.gender = g; popis.push('pohlaví'); }
+  }
+
+  if (b.photo) {
+    const foto = String(b.photo);
+    if (!/^data:image\/(jpeg|jpg|png|webp);base64,/.test(foto)) {
+      return res.status(400).json({ error: 'VALIDACE', message: 'Fotografie musí být obrázek (JPG/PNG/WebP).' });
+    }
+    if (foto.length > 3 * 1024 * 1024) {
+      return res.status(400).json({ error: 'VALIDACE', message: 'Fotografie je příliš velká (max 3 MB).' });
+    }
+    zmeny.photo = foto;
+    popis.push('fotografie');
+  }
+
+  if (!Object.keys(zmeny).length) {
+    return res.json({ ok: true, member: publicMember(m), changes: [], note: 'Nebylo co měnit.' });
+  }
+
+  const updated = await D.Members.update(m.id, zmeny);
+  await X.MembershipAudit.add({
+    member_id: m.id,
+    action: 'profile_update',
+    source: 'app.tjkrupka.cz (samoobsluha člena)',
+    actor_email: m.email,
+    actor_id: m.id,
+    actor_name: `${m.first_name} ${m.last_name}`,
+    note: `Člen si sám upravil údaje: ${popis.join(', ')}.`,
+  });
+  res.json({ ok: true, member: publicMember(updated), changes: popis });
+}));
+
+// Ověřovací kód pro ZMĚNU IDENTIFIKAČNÍCH ÚDAJŮ — jiný účel než u souhlasů
+// (kód vydaný pro souhlasy nesmí jít použít na změnu jména a naopak).
+router.post('/me/identity-code', A.requireMember, asyncRoute(async (req, res) => {
+  const m = req.member;
+  const issued = await X.ConsentCodes.issue(m.id, { purpose: 'identity' });
+  await mailer.sendEmail(m.id, m.email,
+    'Ověřovací kód pro změnu údajů — TJ Krupka',
+    `Dobrý den,\n\npro změnu jména nebo data narození v členské aplikaci Tělovýchovná jednota Krupka zadejte kód:\n\n${issued.code}\n\nKód platí ${issued.ttlMinutes} minut a lze jej použít jednou. Pokud jste o kód nežádali, ignorujte tento e-mail a údaje nikomu neměňte.`);
+  res.json({
+    ok: true, sent: true, ttlMinutes: issued.ttlMinutes, expiresAt: issued.expiresAt,
+    message: `Ověřovací kód jsme poslali na ${m.email}. Platí ${issued.ttlMinutes} minut.`,
+  });
+}));
+
+router.post('/me/identity', A.requireMember, asyncRoute(async (req, res) => {
+  const m = req.member;
+  const b = req.body || {};
+  const v = validators();
+
+  // Ověření, že údaje mění skutečně držitel účtu (heslo, nebo kód na e-mail)
+  const password = b.password;
+  const code = b.code;
+  let authMethod = null;
+  if (m.password_hash && password) {
+    if (!Pwd.verify(String(password), m.password_hash)) {
+      return res.status(401).json({ error: 'NEPLATNE_HESLO', message: 'Heslo není správné — údaje nebyly změněny.' });
+    }
+    authMethod = 'password';
+  } else if (code) {
+    const ov = await X.ConsentCodes.verify(m.id, String(code).trim(), { purpose: 'identity' });
+    if (!ov.ok) {
+      const hlaska = {
+        KOD_EXPIROVAL: 'Ověřovací kód vypršel — pošlete si nový.',
+        KOD_NESOUHLASI: 'Ověřovací kód není správný.',
+        KOD_NEEXISTUJE: 'Nejprve si vyžádejte ověřovací kód.',
+        PRILIS_POKUSU: 'Příliš mnoho pokusů — vyžádejte si nový kód.',
+      }[ov.reason] || 'Ověřovací kód se nepodařilo ověřit.';
+      return res.status(401).json({ error: ov.reason || 'KOD_CHYBA', message: hlaska });
+    }
+    authMethod = 'code';
+  } else {
+    return res.status(401).json({
+      error: 'CHYBI_OVERENI',
+      message: 'Změna jména nebo data narození vyžaduje ověření — zadejte heslo k účtu, nebo si nechte poslat kód na e-mail.',
+    });
+  }
+
+  const firstName = String(b.firstName !== undefined ? b.firstName : m.first_name).trim();
+  const lastName = String(b.lastName !== undefined ? b.lastName : m.last_name).trim();
+  const birthDate = String(b.birthDate !== undefined ? b.birthDate : m.birth_date).trim();
+  if (firstName.length < 2 || lastName.length < 2) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Jméno i příjmení musí mít alespoň 2 znaky.' });
+  }
+  if (!v.isDate(birthDate)) {
+    return res.status(400).json({ error: 'VALIDACE', message: 'Datum narození je ve špatném formátu (YYYY-MM-DD).' });
+  }
+  const age = ageFrom(birthDate);
+  if (age < 0) return res.status(400).json({ error: 'VALIDACE', message: 'Datum narození nemůže být v budoucnosti.' });
+  if (age > 120) return res.status(400).json({ error: 'VALIDACE', message: 'Datum narození je podezřelé (věk nad 120 let).' });
+
+  const zmeny = {};
+  const popis = [];
+  if (firstName !== m.first_name) { zmeny.first_name = firstName; popis.push('jméno'); }
+  if (lastName !== m.last_name) { zmeny.last_name = lastName; popis.push('příjmení'); }
+  if (birthDate !== m.birth_date) { zmeny.birth_date = birthDate; popis.push('datum narození'); }
+  if (!popis.length) {
+    return res.json({ ok: true, member: publicMember(m), changes: [], note: 'Údaje byly stejné, nic se nezměnilo.' });
+  }
+
+  // Nezletilý: bez zákonného zástupce to nejde (souhlas rodiče je právní podmínka)
+  if (age < 18 && !m.guardian_email) {
+    return res.status(409).json({
+      error: 'POTREBA_RODICE',
+      message: 'U nezletilého je potřeba uvést zákonného zástupce a jeho souhlas. Napište prosím na info@tjkrupka.cz — správce údaje doplní.',
+    });
+  }
+
+  // Kategorie členství se POČÍTÁ z věku — po opravě data se musí přepočítat
+  const novaKategorie = membershipTypeForAge(age);
+  const typ = await D.MemberTypes.get(novaKategorie);
+  if (typ && novaKategorie !== m.membership_type) zmeny.membership_type = novaKategorie;
+
+  const updated = await D.Members.update(m.id, zmeny);
+  await X.MembershipAudit.add({
+    member_id: m.id,
+    action: 'identity_update',
+    kind_from: m.membership_type,
+    kind_to: updated.membership_type,
+    source: 'app.tjkrupka.cz (samoobsluha člena)',
+    actor_email: m.email,
+    actor_id: m.id,
+    actor_name: `${m.first_name} ${m.last_name}`,
+    note: `Člen si sám změnil ${popis.join(', ')} (ověřeno: ${authMethod === 'code' ? 'kód na e-mail' : 'heslo'}).`
+      + (zmeny.membership_type ? ` Kategorie členství přepočítána ${m.membership_type} → ${updated.membership_type}.` : ''),
+  });
+
+  res.json({
+    ok: true,
+    member: publicMember(updated),
+    changes: popis,
+    authMethod,
+    note: zmeny.membership_type
+      ? `Uloženo. Kategorie členství se podle nového data narození změnila na „${novaKategorie}“.`
+      : 'Uloženo.',
   });
 }));
 

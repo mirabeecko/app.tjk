@@ -903,6 +903,74 @@ async function main() {
     regObriFotka.status === 413 && /velká/i.test((regObriFotka.data && regObriFotka.data.message) || ''),
     `HTTP ${regObriFotka.status} ${JSON.stringify(regObriFotka.data)}`);
 
+  // ---------- TOK L: člen si sám upravuje své údaje ----------
+  // REGRESE (2026-10-15): překlep v telefonu nebo změna adresy se dřív nedaly
+  // opravit vůbec. Kontaktní údaje si člen mění sám; jméno a datum narození
+  // (mění kategorii členství) jen s ověřením — heslem nebo kódem na e-mail.
+  console.log('\n=== TOK L: úprava vlastních údajů ===\n');
+
+  const emailL = `uprava${Date.now()}@test.cz`;
+  const regL = await api('POST', '/api/register', {
+    firstName: 'Test', lastName: 'Uprava', birthDate: '1990-06-06',
+    street: 'Stará 1', city: 'Krupka', zip: '417 41',
+    email: emailL, phone: '+420 777 000 111', photo: TEST_PHOTO,
+  });
+  check('L1: registrace člena pro úpravu údajů', !!regL.member, JSON.stringify(regL.error || ''));
+
+  const updL = await api('POST', '/api/me/profile', {
+    phone: '+420 777 999 888', street: 'Nová 12', city: 'Teplice', zip: '415 01', gender: 'muz',
+  });
+  check('L2: telefon a adresa uloženy', updL.ok === true && updL.changes.includes('telefon') && updL.changes.includes('adresa'), JSON.stringify(updL.changes));
+
+  const meL = await api('GET', '/api/me');
+  check('L3: nové údaje se vracejí v /me',
+    meL.member.phone === '+420 777 999 888' && meL.member.street === 'Nová 12' && meL.member.city === 'Teplice' && meL.member.zip === '415 01',
+    JSON.stringify({ p: meL.member.phone, s: meL.member.street, c: meL.member.city, z: meL.member.zip }));
+
+  const spatnePsc = await api('POST', '/api/me/profile', { zip: '41' }, { raw: true });
+  check('L4: neplatné PSČ → 400', spatnePsc.status === 400, `HTTP ${spatnePsc.status}`);
+  const spatnyTel = await api('POST', '/api/me/profile', { phone: 'ahoj' }, { raw: true });
+  check('L5: neplatný telefon → 400', spatnyTel.status === 400, `HTTP ${spatnyTel.status}`);
+
+  // stejná past jako u registrace: velká fotka musí projít (limit těla requestu)
+  const fotoL = 'data:image/jpeg;base64,' + 'A'.repeat(2 * 1024 * 1024);
+  const updFotoL = await api('POST', '/api/me/profile', { photo: fotoL }, { raw: true });
+  check('L6: změna fotografie 2 MB projde', updFotoL.status === 200 && updFotoL.data.member.photo.length > 1000000, `HTTP ${updFotoL.status}`);
+
+  const bezOvereniL = await api('POST', '/api/me/identity', { firstName: 'Jinak', lastName: 'Uprava', birthDate: '1990-06-06' }, { raw: true });
+  check('L7: změna jména bez ověření → 401', bezOvereniL.status === 401, `HTTP ${bezOvereniL.status}`);
+
+  const pozadavekL = await api('POST', '/api/me/identity-code');
+  check('L8: kód pro změnu údajů odeslán', pozadavekL.sent === true, JSON.stringify(pozadavekL.message || ''));
+  const obL = await api('GET', '/api/outbox');
+  const mailL = obL.messages.filter((m) => m.to === emailL && m.subject && m.subject.includes('změnu údajů')).pop();
+  const kodL = mailL && (mailL.body.match(/\b(\d{6})\b/) || [])[1];
+  check('L9: kód přišel e-mailem (outbox)', !!kodL, mailL && mailL.subject);
+
+  const zmenaJmenaL = await api('POST', '/api/me/identity', { firstName: 'Jindřich', lastName: 'Uprava', birthDate: '1990-06-06', code: kodL }, { raw: true });
+  check('L10: se správným kódem se jméno změní', zmenaJmenaL.status === 200 && zmenaJmenaL.data.member.firstName === 'Jindřich', JSON.stringify(zmenaJmenaL.data && zmenaJmenaL.data.changes));
+
+  const znovuL = await api('POST', '/api/me/identity', { firstName: 'Kdokoli', lastName: 'Uprava', birthDate: '1990-06-06', code: kodL }, { raw: true });
+  check('L11: použitý kód nelze zneužít znovu', znovuL.status === 401, `HTTP ${znovuL.status}`);
+
+  // oprava data narození u nezletilého → přepočet kategorie členství
+  const diteEmail = `diteuprava${Date.now()}@test.cz`;
+  const regDite = await api('POST', '/api/register', {
+    firstName: 'Malý', lastName: 'Uprava', birthDate: '2014-03-03',
+    street: 'Dětská 2', city: 'Krupka', zip: '417 41', email: diteEmail, photo: TEST_PHOTO,
+    guardian: { name: 'Rodič Test', relation: 'matka', email: `rodicuprava${Date.now()}@test.cz` },
+  });
+  check('L12: registrace nezletilého (kategorie dite)', regDite.member && regDite.member.membershipType === 'dite', regDite.member && regDite.member.membershipType);
+
+  await api('POST', '/api/me/identity-code');
+  const obDite = await api('GET', '/api/outbox');
+  const mailDite = obDite.messages.filter((m) => m.to === diteEmail && m.subject && m.subject.includes('změnu údajů')).pop();
+  const kodDite = mailDite && (mailDite.body.match(/\b(\d{6})\b/) || [])[1];
+  const dospelL = await api('POST', '/api/me/identity', { birthDate: '1995-03-03', code: kodDite }, { raw: true });
+  check('L13: oprava data narození přepočítá kategorii (dite → dospele)',
+    dospelL.status === 200 && dospelL.data.member.membershipType === 'dospele',
+    JSON.stringify(dospelL.data && { typ: dospelL.data.member.membershipType, note: dospelL.data.note }));
+
   // úklid testovacích členů po běhu (lokální DB) — evidence se nezanáší
   // (sync modul navíc @test.cz emaily do Supabase nikdy neodesílá)
   const dClean = new Database(path.join(__dirname, '..', 'data', 'airbag.db'));

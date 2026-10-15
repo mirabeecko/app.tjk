@@ -965,7 +965,125 @@ async function viewProfile() {
   ]);
   root.append(card);
 
-  // ---- VSTUPNÍ PIN (ověření totožnosti u vstupu) ----
+  // ---- ÚPRAVA VLASTNÍCH ÚDAJŮ (samoobsluha) ----
+  // Dřív se překlep v telefonu nebo změna adresy nedaly opravit vůbec — člen
+  // musel psát správci. Kontaktní údaje si teď mění sám; jméno a datum
+  // narození jen s ověřením (mění kategorii členství), e-mail jako přihlašovací
+  // identitu mění správce.
+  const editCard = el('div', { class: 'card' }, [
+    el('h3', { text: 'Upravit moje údaje' }),
+    el('p', { class: 'muted small', text: 'Telefon a adresu si můžete opravit kdykoli sami. Uloží se to i s poznámkou do evidence změn.' }),
+  ]);
+  const fPhone = el('input', { class: 'input', type: 'tel', value: p.phone || '', placeholder: '+420 777 123 456' });
+  const fStreet = el('input', { class: 'input', type: 'text', value: p.street || '', placeholder: 'Ulice a číslo popisné' });
+  const fCity = el('input', { class: 'input', type: 'text', value: p.city || '', placeholder: 'Město' });
+  const fZip = el('input', { class: 'input', type: 'text', inputmode: 'numeric', value: p.zip || '', placeholder: '417 41' });
+  const fGender = el('select', { class: 'input' }, [
+    el('option', { value: '', text: '— neuvedeno' }),
+    el('option', { value: 'muz', text: 'Muž' }),
+    el('option', { value: 'zena', text: 'Žena' }),
+  ]);
+  fGender.value = p.gender || '';
+  editCard.append(
+    el('div', { class: 'form-grid' }, [
+      el('div', {}, [el('label', { text: 'Telefon' }), fPhone]),
+      el('div', {}, [el('label', { text: 'Pohlaví (volitelné, pro statistiky)' }), fGender]),
+      el('div', { class: 'full' }, [el('label', { text: 'Ulice a číslo popisné' }), fStreet]),
+      el('div', {}, [el('label', { text: 'Město' }), fCity]),
+      el('div', {}, [el('label', { text: 'PSČ' }), fZip]),
+    ]),
+  );
+
+  // fotka (nepovinná změna) — zmenšuje se v prohlížeči stejně jako u registrace
+  let novaFoto = '';
+  const fotoInput = el('input', { type: 'file', id: 'profil-photo', accept: 'image/*', style: 'display:none' });
+  const fotoNahled = el('div', { id: 'profil-photo-preview', class: 'photo-preview' + (p.photo ? ' has-photo' : ''), text: p.photo ? '' : 'Nahrát novou fotografii' });
+  if (p.photo) fotoNahled.style.backgroundImage = `url(${p.photo})`;
+  fotoInput.addEventListener('change', async (ev) => {
+    const file = (ev.target.files || [])[0];
+    if (!file) return;
+    if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.type)) { toast('Vyberte obrázek (JPG/PNG/WebP)', true); return; }
+    try {
+      novaFoto = await zmensiFotku(file);
+      fotoNahled.style.backgroundImage = `url(${novaFoto})`;
+      fotoNahled.classList.add('has-photo');
+      fotoNahled.textContent = '';
+      toast('Fotografie připravena — nezapomeňte uložit.');
+    } catch (err) { toast(err.message, true); }
+  });
+  fotoNahled.addEventListener('click', () => fotoInput.click());
+  editCard.append(el('div', { class: 'photo-upload' }, [
+    fotoInput, fotoNahled,
+    el('button', { type: 'button', class: 'btn small ghost', text: 'Vybrat novou fotografii', onclick: () => fotoInput.click() }),
+    el('p', { class: 'muted small', text: 'Fotografie slouží k ověření totožnosti u vstupu — měňte ji jen za svou aktuální.' }),
+  ]));
+
+  const ulozit = el('button', { class: 'btn', type: 'button' }, [ico('check', 16), ' Uložit změny']);
+  ulozit.addEventListener('click', async () => {
+    ulozit.disabled = true;
+    try {
+      const body = {
+        phone: fPhone.value.trim(), street: fStreet.value.trim(),
+        city: fCity.value.trim(), zip: fZip.value.trim(), gender: fGender.value || null,
+      };
+      if (novaFoto) body.photo = novaFoto;
+      const r = await API.post('/me/profile', body);
+      await refreshMe({ force: true });
+      toast(r.changes && r.changes.length ? `Uloženo: ${r.changes.join(', ')}.` : (r.note || 'Uloženo.'));
+      render();
+    } catch (err) { toast(err.message, true); }
+    finally { ulozit.disabled = false; }
+  });
+  editCard.append(el('div', { class: 'row-gap' }, [ulozit]));
+  root.append(editCard);
+
+  // ---- JMÉNO A DATUM NAROZENÍ (jen s ověřením) ----
+  const idCard = el('div', { class: 'card' }, [
+    el('h3', { text: 'Jméno a datum narození' }),
+    el('p', { class: 'muted small', text: 'Tyto údaje mění kategorii členství (a u nezletilých i právní podmínky), proto je nelze měnit jen tak. Ověřte se heslem k účtu, nebo si nechte poslat kód na e-mail. Změna se zapíše do evidence změn.' }),
+  ]);
+  const iFirst = el('input', { class: 'input', type: 'text', value: p.firstName || '', placeholder: 'Jméno' });
+  const iLast = el('input', { class: 'input', type: 'text', value: p.lastName || '', placeholder: 'Příjmení' });
+  const iBirth = el('input', { class: 'input', type: 'date', value: (p.birthDate || '').slice(0, 10) });
+  const iPass = el('input', { class: 'input', type: 'password', placeholder: 'Heslo k účtu (nebo kód z e-mailu)' });
+  const iCode = el('input', { class: 'input', type: 'text', inputmode: 'numeric', placeholder: 'Kód z e-mailu' });
+  const kodBtn = el('button', { class: 'btn ghost small', type: 'button' }, [ico('mail', 15), ' Poslat kód na e-mail']);
+  kodBtn.addEventListener('click', async () => {
+    kodBtn.disabled = true;
+    try {
+      const r = await API.post('/me/identity-code');
+      toast(r.message || 'Kód odeslán.');
+    } catch (err) { toast(err.message, true); }
+    finally { kodBtn.disabled = false; }
+  });
+  const idBtn = el('button', { class: 'btn small', type: 'button', text: 'Uložit jméno a datum' });
+  idBtn.addEventListener('click', async () => {
+    idBtn.disabled = true;
+    try {
+      const r = await API.post('/me/identity', {
+        firstName: iFirst.value.trim(), lastName: iLast.value.trim(), birthDate: iBirth.value,
+        password: iPass.value || undefined, code: iCode.value ? iCode.value.trim() : undefined,
+      });
+      iPass.value = ''; iCode.value = '';
+      await refreshMe({ force: true });
+      toast(r.note || 'Uloženo.');
+      render();
+    } catch (err) { toast(err.message, true); }
+    finally { idBtn.disabled = false; }
+  });
+  idCard.append(
+    el('div', { class: 'form-grid' }, [
+      el('div', {}, [el('label', { text: 'Jméno' }), iFirst]),
+      el('div', {}, [el('label', { text: 'Příjmení' }), iLast]),
+      el('div', { class: 'full' }, [el('label', { text: 'Datum narození' }), iBirth]),
+      el('div', {}, [el('label', { text: 'Heslo k účtu' }), iPass]),
+      el('div', {}, [el('label', { text: 'Nebo kód z e-mailu' }), iCode]),
+    ]),
+    el('div', { class: 'row-gap' }, [kodBtn, idBtn]),
+    el('p', { class: 'muted small', text: `E-mail (${p.email}) je váš přihlašovací údaj — jeho změnu udělá správce (napište na info@tjkrupka.cz).` }),
+  );
+  root.append(idCard);
+
   const pinCard = el('div', { class: 'card' }, [
     el('h3', { text: 'Vstupní PIN' }),
     el('p', { class: 'muted small', text: me.member.entryPinSet
