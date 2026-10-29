@@ -1,30 +1,27 @@
 // sw.js — Service Worker: app shell cache + offline režim pro členskou kartu a provozní řád.
 'use strict';
 
-const CACHE = 'airbag-v48';
+const CACHE = 'airbag-v53';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/fonts.css?v=48',
-  '/css/app.css?v=48',
-  '/css/fonts-v3.css?v=48',
-  '/css/theme-v3.css?v=48',
-  '/js/api.js?v=48',
-  '/js/ui.js?v=48',
-  '/js/czech.js?v=48',
-  '/js/md.js?v=48',
-  '/js/views-public.js?v=48',
-  '/js/views-member.js?v=48',
+  '/css/fonts.css?v=53',
+  '/css/app.css?v=53',
+  '/css/fonts-airbag.css?v=53',
+  '/css/theme-airbag.css?v=53',
+  '/js/api.js?v=53',
+  '/js/ui.js?v=53',
+  '/js/czech.js?v=53',
+  '/js/md.js?v=53',
+  '/js/views-public.js?v=53',
+  '/js/views-member.js?v=53',
   // views-admin.js / views-dozor.js se načítají LENIVĚ (viz načtiSkript v app.js)
   // → do pre-cache nepatří, jinak by každý stahoval kód, který nepoužije.
-  '/js/app.js?v=48',
+  '/js/app.js?v=53',
   // fonty jsou vlastní (žádná cizí doména) — bez nich by offline režim ztratil písmo
   '/fonts/inter-latin.woff2',
-  '/fonts/plusjakartasans-400-latin.woff2',
-  '/fonts/plusjakartasans-500-latin.woff2',
-  '/fonts/plusjakartasans-600-latin.woff2',
-  '/fonts/plusjakartasans-400-latin-ext.woff2',
-  '/fonts/jetbrainsmono-500-latin.woff2',
+  '/fonts/archivo-var-latin.woff2',
+  '/fonts/spacegrotesk-var-latin.woff2',
   '/fonts/outfit-latin.woff2',
   '/manifest.json',
   '/favicon.ico',
