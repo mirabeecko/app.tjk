@@ -6,6 +6,7 @@ const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 
 /* ---------- inline SVG ikony (Lucide-style, stroke) ---------- */
 const ICONS = {
+  menu: '<path d="M4 6h16M4 12h16M4 18h10"/>',
   home: '<path d="M3 9.5 12 3l9 6.5V20a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   ticket: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2M13 17v2M13 11v2"/>',

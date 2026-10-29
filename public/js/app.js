@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=53';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=53';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=54';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=54';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -147,24 +147,63 @@ function renderNav() {
   // Dev inbox (outbox) je chráněn přihlášením — nabídka jen pro přihlášené
   if (isLoggedIn()) moreItems.push({ href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' });
 
-  // top nav (desktop): hlavní položky + CTA
-  for (const it of mainItems) {
-    topnav.append(el('a', { class: 'nav-btn' + (isActive(it.href) ? ' active' : ''), href: it.href, text: it.label }));
+  // boční panel (desktop, design 2026): CELÁ navigace po sekcích + karta profilu dole.
+  // Dřív tu byly jen 2 položky a zbytek (správa, vlastník…) byl schovaný v menu „více".
+  const railSections = [
+    { title: 'Hlavní', items: mainItems.concat(isLoggedIn() ? [{ href: '#/karta', label: 'Členská karta', icon: 'ticket' }] : []) },
+    { title: 'Informace', items: [{ href: '#/pravidla', label: 'Pravidla provozu', icon: 'shield' }, { href: '#/podminky', label: 'Provozní řád', icon: 'file' }] },
+  ];
+  if (isLoggedIn()) {
+    const work = []
+      .concat(isDozor() ? [{ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' }] : [])
+      .concat(isStaff() ? [{ href: '#/admin', label: 'Správa členů', icon: 'dashboard' }] : []);
+    if (work.length) railSections.push({ title: 'Provoz', items: work });
+    if (isSuperAdmin()) {
+      railSections.push({ title: 'Vlastník', items: [
+        { href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' },
+        { href: '#/superadmin-dozor', label: 'Správa dozoru', icon: 'qr', highlight: 'owner' },
+        { href: '#/superadmin', label: 'Vlastník', icon: 'shield', highlight: 'owner' },
+        { href: '#/katalog-admin', label: 'Katalog', icon: 'bag', highlight: 'owner' },
+      ] });
+    }
+    railSections.push({ title: 'Účet', items: [
+      { href: '#/notifikace', label: 'Notifikace', icon: 'bell' },
+      { href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' },
+    ] });
+  }
+  for (const sec of railSections) {
+    topnav.append(el('div', { class: 'rn-section', text: sec.title }));
+    for (const it of sec.items) {
+      topnav.append(el('a', {
+        class: 'nav-btn' + (isActive(it.href) ? ' active' : '') + (it.highlight ? ` hl-${it.highlight}` : ''),
+        href: it.href,
+      }, [
+        ico(it.icon, 18),
+        el('span', { text: it.label }),
+        it.href === '#/notifikace' ? el('span', { class: 'notif-badge', style: 'display:none' }) : null,
+      ]));
+    }
   }
   if (isLoggedIn()) {
-    // Chip s profilem: CELÉ jméno + zkratka role (křestní jméno nestačí)
+    // karta profilu: CELÉ jméno + role (křestní jméno nestačí)
+    const photo = me.member.photo || me.member.photoUrl || '';
+    const initials = memberFullName(me.member).split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase();
+    const ava = el('span', { class: 'ru-ava' });
+    if (photo) { const img = document.createElement('img'); img.src = photo; img.alt = ''; ava.append(img); } else ava.textContent = initials;
     topnav.append(el('a', {
-      class: 'nav-btn cta nav-me',
+      class: 'rail-user',
       href: '#/profil',
       title: `Přihlášený profil: ${memberFullName(me.member)} — ${roleLabel(me.member.role)} (${me.member.email || ''})`,
     }, [
-      ico('user', 15),
-      el('span', { class: 'nav-me-name', text: memberFullName(me.member) }),
-      el('span', { class: 'nav-me-role', text: roleShort(me.member.role) }),
+      ava,
+      el('span', { class: 'ru-txt' }, [
+        el('span', { class: 'ru-name', text: memberFullName(me.member) }),
+        el('span', { class: 'ru-role', text: roleLabel(me.member.role) }),
+      ]),
     ]));
   } else {
-    topnav.append(el('a', { class: 'nav-btn ghost-cta', href: '#/prihlaseni' }, [ico('key', 15), ' ', 'Přihlásit se']));
-    topnav.append(el('a', { class: 'nav-btn cta', href: '#/registrace' }, [ico('edit', 15), ' ', 'Registrace']));
+    topnav.append(el('a', { class: 'nav-btn ghost-cta', href: '#/prihlaseni' }, [ico('key', 16), el('span', { text: 'Přihlásit se' })]));
+    topnav.append(el('a', { class: 'nav-btn cta', href: '#/registrace' }, [ico('edit', 16), el('span', { text: 'Registrace' })]));
   }
 
   // mobilní / „více" menu (sekce)
@@ -204,17 +243,18 @@ function renderNav() {
     }
   }
 
-  // bottom nav (mobile) — design v3: čtyři položky jako v mockupu
+  // bottom nav (mobil, design 2026): nejčastější cíle + „Více" (spodní panel se zbytkem)
   const mobileItems = [
     { href: '#/', label: 'Domů', icon: 'home' },
     isLoggedIn()
-      ? { href: '#/karta', label: 'Karta', icon: 'qr' }
+      ? { href: '#/karta', label: 'Karta', icon: 'ticket' }
       : { href: '#/prihlaseni', label: 'Přihlásit', icon: 'key' },
     { href: '#/rezervace', label: 'Rezervace', icon: 'clock' },
-    { href: '#/podminky', label: 'Podmínky', icon: 'file' },
   ];
   // Dozor se musí trefit do spodní lišty (je to hlavní pracovní nástroj na place)
-  if (isLoggedIn() && isDozor()) mobileItems.splice(3, 0, { href: '#/dozor', label: 'Dozor', icon: 'qr' });
+  if (isLoggedIn() && isDozor()) mobileItems.push({ href: '#/dozor', label: 'Dozor', icon: 'qr' });
+  else if (isLoggedIn() && isStaff()) mobileItems.push({ href: '#/admin', label: 'Správa', icon: 'dashboard' });
+  else mobileItems.push({ href: '#/podminky', label: 'Řád', icon: 'file' });
 
   for (const it of mobileItems) {
     bottomnav.append(el('a', { href: it.href, class: isActive(it.href) ? 'active' : '' }, [
@@ -222,6 +262,16 @@ function renderNav() {
       el('span', { text: it.label }),
     ]));
   }
+  const moreTab = el('button', { type: 'button', class: 'bn-more', 'aria-label': 'Další nabídka', 'aria-controls': 'mobile-menu' }, [
+    el('span', { class: 'ico' }, [ico('menu')]),
+    el('span', { text: 'Více' }),
+  ]);
+  moreTab.addEventListener('click', (ev) => {
+    ev.stopPropagation();           // jinak by ho hned zavřel posluchač „klik mimo menu"
+    const more = $('#more-btn');
+    if (more) more.click();
+  });
+  bottomnav.append(moreTab);
   bottomnav.hidden = false;
 }
 
