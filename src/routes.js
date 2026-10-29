@@ -301,7 +301,7 @@ async function latestDocVersions() {
 /** Invalidace cache dokumentů (volat po vytvoření nové verze dokumentu). */
 function invalidateDocsCache() { _docsCache = null; _docsCacheAt = 0; }
 
-router.get('/docs', asyncRoute(async (req, res) => {
+router.get('/docs', A.requireMember, asyncRoute(async (req, res) => {
   const slim = req.query.slim === '1';
   const includeRetired = req.query.includeRetired === '1' || req.query.retired === '1';
   const all = await latestDocVersions();
@@ -334,7 +334,7 @@ router.get('/docs', asyncRoute(async (req, res) => {
 // ---------- PARAMETRY PROVOZU (co čeká na potvrzení od výrobce / provozovatele) ----
 // Aplikace NIKDY nezobrazuje odhadnuté technické limity: dokud parametr nemá
 // potvrzenou hodnotu se zdrojem, vrací se jako „čeká na doplnění“ bez hodnoty.
-router.get('/op-parameters', asyncRoute(async (req, res) => {
+router.get('/op-parameters', A.requireMember, asyncRoute(async (req, res) => {
   const rows = await X.OpParameters.list();
   res.json({
     parameters: rows.map((p) => ({

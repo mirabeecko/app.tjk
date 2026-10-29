@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=55';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=55';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=56';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=56';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -35,7 +35,7 @@ const routes = [
   { pattern: /^#\/karta$/, view: viewCard, name: 'Členská karta', icon: 'ticket', kicker: 'Vstup na matraci' },
   // Akce spolku jsou momentálně SKRYTÉ z UI (backend a testy připravené) —
   // route se vrátí jedním řádkem: { pattern: /^#\/akce$/, view: viewEvents, name: 'Akce', icon: 'calendar' },
-  { pattern: /^#\/pravidla$/, view: viewRules, name: 'Pravidla provozu', icon: 'shield', kicker: 'Bezpečnost' },
+  { pattern: /^#\/pravidla$/, view: viewRules, name: 'Pravidla provozu', icon: 'shield', kicker: 'Bezpečnost', auth: true },
   { pattern: /^#\/profil$/, view: viewProfile, name: 'Profil', icon: 'user', kicker: 'Můj účet' },
   { pattern: /^#\/notifikace$/, view: viewNotifications, name: 'Notifikace', icon: 'bell', kicker: 'Můj účet' },
   // ---- SPRÁVA (kód se dotahuje lenivě) ----
@@ -50,7 +50,7 @@ const routes = [
   // ---- VLASTNÍK: přehled základny + správa dozoru (pouze miroslavbrozek@gmail.com) ----
   { pattern: /^#\/zakladna$/, view: () => viewSuperAdminZakladna(), lazy: SKRIPT_DOZOR, name: 'Členská základna', icon: 'users', kicker: 'Vlastník', owner: true },
   { pattern: /^#\/superadmin-dozor$/, view: () => viewSuperAdminDozor(), lazy: SKRIPT_DOZOR, name: 'Správa dozoru', icon: 'qr', kicker: 'Vlastník', owner: true },
-  { pattern: /^#\/podminky$/, view: viewDocs, name: 'Podmínky', icon: 'file', kicker: 'Dokumenty' },
+  { pattern: /^#\/podminky$/, view: viewDocs, name: 'Podmínky', icon: 'file', kicker: 'Dokumenty', auth: true },
   // POZOR: viewBookings žije ve views-admin.js — MUSÍ být obalené v lazy šipce,
   // jinak by se na něj router odkazoval v okamžiku sestavení a spadl by celý
   // start aplikace (ReferenceError). Rezervace proto dotahuje admin skript.
@@ -68,6 +68,12 @@ async function render() {
   // načti session (pokud ještě není)
   if (!me) await refreshMe().catch(() => {});
 
+  // Pravidla a dokumenty k odsouhlasení jsou jen pro přihlášené (zadání 2026-10-29)
+  if (route.auth && !isLoggedIn()) {
+    toast('Pravidla a dokumenty uvidíte po přihlášení.');
+    location.hash = '#/prihlaseni';
+    return;
+  }
   const match = hash.match(route.pattern);
   _routeNow = route;
   { const v = $('#view'); if (v) v.className = 'view'; }
@@ -124,16 +130,17 @@ function renderNav() {
   // Aktivní položka: „Přehled" (#/) se musí rozsvítit taky
   const isActive = (href) => (href === '#/' ? (hash === '#/' || hash === '') : hash.startsWith(href));
   const logged = isLoggedIn();
+  document.body.classList.toggle('is-logged', logged);
 
   // ---- skupiny položek (design Komárka 2026) ----
   const mainItems = [
     { href: '#/', label: 'Přehled', icon: 'home' },
     { href: '#/rezervace', label: 'Rezervace', icon: 'clock' },
-  ].concat(logged ? [{ href: '#/karta', label: 'Karta', icon: 'ticket' }] : [])
-    .concat([
-      { href: '#/pravidla', label: 'Pravidla', icon: 'shield' },
-      { href: '#/podminky', label: 'Provozní řád', icon: 'file' },
-    ]);
+  ].concat(logged ? [
+    { href: '#/karta', label: 'Karta', icon: 'ticket' },
+    { href: '#/pravidla', label: 'Pravidla', icon: 'shield' },
+    { href: '#/podminky', label: 'Provozní řád', icon: 'file' },
+  ] : []);
   // práce na place a správa — v hlavičce jako rozbalovací „Správa"
   const workItems = [];
   if (logged && isDozor()) workItems.push({ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' });

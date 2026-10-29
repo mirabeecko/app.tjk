@@ -1,65 +1,39 @@
 // views-member.js — přihlášené pohledy: souhlasy, platba, QR karta, profil.
 'use strict';
 
-/* ---------- E-SOUHLAS S PODMÍNKAMI (hlavní funkce) ---------- */
+/* ---------- SOUHLASY (krok 2 průvodce registrací) ----------
+   Zjednodušeno 2026-10-29: jeden seznam dokumentů (každý se dá otevřít),
+   „Označit vše", jedno ověření (kód z e-mailu, případně heslo) a jedno
+   tlačítko. Po uložení vede rovnou na platbu. API i auditní stopa beze změny. */
 async function viewConsent() {
   const root = $('#view');
   root.innerHTML = '';
 
   if (!me || !me.member) {
-    root.append(el('h1', { text: 'Souhlasy a dokumenty' }), el('div', { class: 'alert warn', text: 'Pro pokračování se přihlaste.' }), el('a', { class: 'btn', href: '#/prihlaseni', text: 'Přihlásit se' }));
+    root.append(el('h1', { text: 'Souhlasy' }), el('div', { class: 'alert warn', text: 'Pro pokračování se přihlaste.' }), el('a', { class: 'btn', href: '#/prihlaseni', text: 'Přihlásit se' }));
     return;
   }
   const m = me.member;
+  root.append(
+    el('h1', { text: 'Souhlasy' }),
+    el('p', { class: 'muted', text: 'Přečti si dokumenty spolku a potvrď je. Zabere to pár minut — pak už jen platba.' }),
+    regSteps(1),
+  );
 
-  // stejná grafika průběhu jako na /platba (hotovo zeleně, aktuální krok oranžově)
-  root.append(el('h1', { text: 'Souhlasy a dokumenty' }), regSteps(1));
-  root.append(el('div', { class: 'alert info' }, [
-    el('strong', { text: 'Co potvrzujete: ' }),
-    el('span', { text: 'souhlasy jsou rozdělené — členství, služby a (u nezletilých) zákonný zástupce. Každé potvrzení se ukládá s verzí dokumentu, otiskem znění (SHA-256), časem serveru, IP adresou a identitou účtu do auditní stopy. Nejde o vlastnoruční podpis ani o kvalifikované elektronické časové razítko.' }),
-  ]));
+  // obsahy dokumentů pro náhled
+  const docsMap = {};
+  try { for (const d of (await API.get('/docs')).docs) docsMap[d.docKey] = d; } catch (e) { /* offline */ }
 
-  // čekající souhlas rodiče
-  if (m.guardianStatus === 'pending') {
-    const resendBtn = el('button', {
-      class: 'btn ghost small', type: 'button', text: 'Znovu odeslat e-mail rodiči',
-      onclick: async (ev) => {
-        const b = ev.currentTarget;
-        b.disabled = true; b.textContent = 'Odesílám…';
-        try { await API.post('/guardian-resend'); toast('E-mail se souhlasem byl znovu odeslán'); b.textContent = 'Odesláno'; }
-        catch (err) { b.disabled = false; b.textContent = 'Znovu odeslat e-mail rodiči'; toast(err.message, true); }
-      },
-    });
-    root.append(el('div', { class: 'card warn' }, [
-      el('h3', { text: 'Čeká se na souhlas zákonného zástupce' }),
-      el('p', { text: 'Odkaz pro e-souhlas rodiče byl odeslán e-mailem (platí 7 dní). Dokud nebude potvrzen, nelze dokončit nákup.' }),
-      el('p', { class: 'small muted', text: `Rodič: ${m.guardianName || ''} (${m.guardianEmail || ''})` }),
-      el('div', { class: 'row-gap', style: 'margin-top:12px' }, [resendBtn]),
-    ]));
-  }
-
-  // obsahy dokumentů pro „zobrazit plné znění"
-  let docsMap = {};
-  try {
-    const res = await API.get('/docs');
-    for (const d of res.docs) docsMap[d.docKey] = d;
-  } catch (e) { /* offline */ }
-
-  // skupiny ze serveru (členství → služba → zástupce)
   let groups = [];
   let guard = null;
   try { const g = await API.get('/consent-groups'); groups = g.groups || []; guard = g.guardian || null; }
   catch (e) { root.append(el('div', { class: 'alert err', text: e.message })); return; }
 
-  // SOUHLASY JAKO JEDEN KRÁTKÝ SEZNAM
-  // Tentýž dokument bývá požadovaný členstvím I službou (provozní řád, GDPR) —
-  // v seznamu proto má být JEDNOU, jen s poznámkou, čeho se týká. Uživatel pak
-  // nevidí „hromadu dokumentů“, ale 5 položek, a plné znění se otevírá až na
-  // kliknutí (náhled s naformátovaným textem).
+  // tentýž dokument požaduje členství i služba → v seznamu jen jednou
   const docsList = [];
   const docsIndex = {};
   groups.forEach((group) => {
-    if (group.key === 'guardian') return; // zástupce se řeší zvlášť níže
+    if (group.key === 'guardian') return;
     const label = group.key.startsWith('service:') ? 'vstup na matraci' : 'členství';
     for (const d of group.docs) {
       if (!docsIndex[d.docKey]) {
@@ -71,206 +45,146 @@ async function viewConsent() {
       if (d.signed) item.signed = true;
     }
   });
+  const unsigned = docsList.filter((d) => !d.signed);
+  const guardMissing = guard ? guard.docs.filter((d) => !d.signed).length : 0;
+  const guardOk = !guard || (guard.guardianGranted && guardMissing === 0);
 
-  const allChecks = [];
-  const chybiVDokumentech = docsList.filter((d) => !d.signed).length;
-  let totalMissing = chybiVDokumentech + (guard ? guard.docs.filter((d) => !d.signed).length : 0);
-
-  const seznam = el('div', { class: 'card' }, [
-    el('div', { class: 'list-row' }, [
-      el('span', {}, [
-        el('strong', { text: 'Co potvrzujete' }),
-        el('span', { class: 'small muted', text: ` · ${docsList.length} dokumentů` }),
+  // ---- zákonný zástupce (jen nezletilí) — krátce, s možností znovu poslat e-mail
+  if (guard && !guardOk) {
+    const resendBtn = el('button', { class: 'btn small', type: 'button', text: 'Poslat e-mail rodiči znovu' });
+    resendBtn.addEventListener('click', async () => {
+      resendBtn.disabled = true; resendBtn.textContent = 'Odesílám…';
+      try { await API.post('/guardian-resend'); toast('E-mail se souhlasem byl znovu odeslán'); resendBtn.textContent = 'Odesláno'; }
+      catch (err) { resendBtn.disabled = false; resendBtn.textContent = 'Poslat e-mail rodiči znovu'; toast(err.message, true); }
+    });
+    root.append(el('div', { class: 'alert warn' }, [
+      ico('users', 18),
+      el('div', {}, [
+        el('b', { text: 'Čeká se na souhlas rodiče. ' }),
+        `Odkaz jsme poslali na ${guard.guardianEmail || m.guardianEmail || 'e-mail rodiče'}. Jakmile ho potvrdí, můžeš zaplatit.`,
+        el('div', { class: 'btn-row', style: 'margin-top:10px' }, [resendBtn]),
       ]),
-      el('span', { class: 'tag ' + (chybiVDokumentech ? 'warn' : 'ok'), text: chybiVDokumentech ? `${chybiVDokumentech} zbývá` : 'Hotovo' }),
-    ]),
-  ]);
+    ]));
+  }
 
+  // ---- všechno podepsané → jen pokračovat
+  if (!unsigned.length) {
+    root.append(el('div', { class: 'card flow-card flow-done' }, [
+      el('span', { class: 'done-ic' }, [ico('check', 22)]),
+      el('div', {}, [
+        el('h3', { text: 'Souhlasy máš potvrzené' }),
+        el('p', { class: 'muted small', text: guardOk ? 'Můžeš pokračovat k platbě.' : 'Zbývá jen souhlas rodiče — pak můžeš zaplatit.' }),
+      ]),
+      guardOk ? el('a', { class: 'btn', href: '#/platba', text: 'Pokračovat k platbě →' }) : null,
+    ]));
+    root.append(dokladDetails());
+    return;
+  }
+
+  // ---- seznam dokumentů
+  const rows = [];
+  const list = el('div', { class: 'doc-list flow-docs' });
   for (const d of docsList) {
     const doc = docsMap[d.docKey] || {};
-    const radek = el('div', { class: 'doc-row' + (d.signed ? ' checked' : '') }, [
+    const input = el('input', { type: 'checkbox', value: d.docKey, checked: d.signed, disabled: d.signed });
+    const row = el('div', { class: 'doc-row' + (d.signed ? ' checked' : '') }, [
       el('label', { class: 'doc-row-main' }, [
-        el('input', { type: 'checkbox', name: `doc-${d.docKey}`, value: d.docKey, checked: d.signed, disabled: d.signed }),
+        input,
         el('span', { class: 'doc-row-body' }, [
-          el('span', { class: 'doc-row-title', text: doc.title || d.docKey }),
-          el('span', { class: 'doc-row-meta', text: `${d.labels.join(' + ')} · verze ${d.version}${d.signed ? ' · potvrzeno' : ''}` }),
+          el('span', { class: 'doc-row-title', text: doc.title || docLabel(d.docKey) }),
+          el('span', { class: 'doc-row-meta', text: d.signed ? 'potvrzeno' : `verze ${d.version} · ${d.labels.join(' + ')}` }),
         ]),
       ]),
-      el('button', {
-        type: 'button', class: 'btn tiny ghost', text: 'Zobrazit',
-        onclick: () => otevriNahledDokumentu(doc, d),
-      }),
+      el('button', { type: 'button', class: 'btn tiny ghost', text: 'Číst', onclick: () => otevriNahledDokumentu(doc, d) }),
     ]);
-    const input = $('input', radek);
-    input.addEventListener('change', () => radek.classList.toggle('checked', input.checked));
-    seznam.append(radek);
-    if (!d.signed) allChecks.push(radek);
+    input.addEventListener('change', () => { row.classList.toggle('checked', input.checked); sync(); });
+    list.append(row);
+    if (!d.signed) rows.push(input);
   }
-  root.append(seznam);
+  const allBtn = el('button', { type: 'button', class: 'linkish', text: 'Označit vše' });
+  allBtn.addEventListener('click', () => {
+    const on = !rows.every((i) => i.checked);
+    rows.forEach((i) => { i.checked = on; i.closest('.doc-row').classList.toggle('checked', on); });
+    sync();
+  });
 
+  // ---- ověření: kód z e-mailu (výchozí) nebo heslo
+  const codeInput = el('input', { class: 'input', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', placeholder: '6místný kód z e-mailu', maxlength: '6' });
+  const passInput = el('input', { class: 'input', type: 'password', placeholder: 'Heslo k účtu', autocomplete: 'current-password' });
+  const codeBtn = el('button', { class: 'btn small', type: 'button' }, [ico('mail', 15), 'Poslat kód']);
+  codeBtn.addEventListener('click', async () => {
+    codeBtn.disabled = true;
+    try {
+      const r = await API.post('/consent-code');
+      toast(r.message || 'Kód jsme poslali na tvůj e-mail.');
+      codeBtn.lastChild.textContent = 'Poslat znovu';
+      codeInput.focus();
+    } catch (err) { toast(err.message, true); }
+    finally { codeBtn.disabled = false; }
+  });
+  const passWrap = el('div', { class: 'pass-wrap', hidden: true }, [passInput]);
+  const passToggle = el('button', { type: 'button', class: 'linkish', text: 'Mám heslo — ověřit heslem' });
+  passToggle.addEventListener('click', () => { passWrap.hidden = !passWrap.hidden; if (!passWrap.hidden) passInput.focus(); });
 
-  // ZÁSTUPCE — krok
-  if (guard) {
-    const missingG = guard.docs.filter((d) => !d.signed).length;
-    totalMissing += missingG;
-    const card = el('div', { class: 'card ' + (guard.guardianGranted && missingG === 0 ? 'accent' : 'warn') }, [
-      el('div', { class: 'list-row' }, [
-        el('strong', { text: 'Zákonný zástupce (nezletilý)' }),
-        el('span', { class: 'tag ' + (guard.guardianGranted && missingG === 0 ? 'ok' : 'warn'), text: guard.guardianGranted ? (missingG ? `${missingG} zbývá` : 'Potvrzeno') : 'Čeká se na souhlas' }),
-      ]),
-    ]);
-    if (guard.guardianGranted) {
-      for (const d of guard.docs) {
-        card.append(el('div', { class: 'list-row' }, [
-          el('span', { text: docsMap[d.docKey] ? docsMap[d.docKey].title : d.docKey }),
-          el('span', { class: 'tag ok', text: d.signed ? 'Podepsáno (rodič)' : 'chybí' }),
-        ]));
-      }
-    } else {
-      card.append(el('p', { class: 'muted small', text: `Na e-mail ${guard.guardianEmail || 'rodiče'} jsme odeslali odkaz. Po jeho otevření rodič potvrdí souhlas a zde se stav aktualizuje.` }));
-      if (m.guardianStatus !== 'pending') {
-        card.append(el('p', { class: 'small muted', text: 'Pokud odkaz nefunguje, použijte „Znovu odeslat" nahoře.' }));
-      }
-    }
-    root.append(card);
+  const btn = el('button', { class: 'btn btn-block', type: 'button', text: 'Potvrdit souhlasy' });
+  const counter = el('span', { class: 'tag warn' });
+  function sync() {
+    const n = rows.filter((i) => i.checked).length;
+    counter.textContent = `${n} z ${rows.length}`;
+    counter.className = 'tag ' + (n === rows.length ? 'ok' : 'warn');
+    allBtn.textContent = n === rows.length ? 'Zrušit výběr' : 'Označit vše';
   }
+  sync();
 
-  // ---- PŘIPRAVENOST: potvrzení dokumentů NENÍ totéž co připravenost ke skoku ----
-  const readiness = el('div', { class: 'card soft' }, [
-    el('h3', { text: 'Připravenost ke skoku' }),
-    el('p', { class: 'muted small', text: 'Potvrzené dokumenty jsou jen jedna z podmínek. O vstupu rozhoduje dozor podle provozního řádu (čl. 3) — stav níže ukazuje, co podle evidence aplikace chybí.' }),
-  ]);
-  try {
-    const rd = await API.get('/me/readiness');
-    readiness.append(el('div', { class: 'state-row' }, [
-      el('div', { class: 'state-box ' + (rd.statements.documentsConfirmed ? 'yes' : 'no') }, [
-        el('span', { class: 'sb-k', text: 'Dokument potvrzen' }),
-        el('span', { class: 'sb-v', text: rd.statements.documentsConfirmed ? 'ANO' : 'NE' }),
-      ]),
-      el('div', { class: 'state-box ' + (rd.statements.instructionCompleted ? 'yes' : 'no') }, [
-        el('span', { class: 'sb-k', text: 'Instruktáž absolvována' }),
-        el('span', { class: 'sb-v', text: rd.statements.instructionCompleted ? 'ANO' : 'NE' }),
-      ]),
-      el('div', { class: 'state-box ' + (rd.statements.entryAllowed ? 'yes' : 'no') + ' big' }, [
-        el('span', { class: 'sb-k', text: 'Vstup povolen' }),
-        el('span', { class: 'sb-v', text: rd.statements.entryAllowed ? 'ANO' : 'NE' }),
-      ]),
-    ]));
-    if (!rd.statements.instructionCompleted) {
-      readiness.append(el('p', { class: 'small muted', text: `Praktickou instruktáž provádí a zaznamenává dozor na místě. ${(rd.instruction && rd.instruction.message) || ''}` }));
+  btn.addEventListener('click', async () => {
+    const docKeys = rows.filter((i) => i.checked).map((i) => i.value);
+    if (docKeys.length < rows.length) { toast('Pro vstup je potřeba potvrdit všechny dokumenty.', true); return; }
+    if (!codeInput.value.trim() && !passInput.value) {
+      toast('Ověř prosím, že potvrzuješ ty — kódem z e-mailu, nebo heslem.', true);
+      codeInput.focus();
+      return;
     }
-    if (rd.blocking && rd.blocking.length) {
-      readiness.append(el('div', { class: 'blocking-list' }, [
-        el('div', { class: 'bl-title', text: 'Co ještě chybí:' }),
-        ...rd.blocking.map((b) => el('div', { class: 'bl-item' }, [
-          el('span', { text: '•' }),
-          el('span', {}, [el('strong', { text: b.label + ': ' }), b.message || '']),
-        ])),
-      ]));
+    btn.disabled = true; btn.textContent = 'Ukládám…';
+    try {
+      const res = await API.post('/consent', {
+        docKeys,
+        password: passInput.value || undefined,
+        code: codeInput.value ? codeInput.value.trim() : undefined,
+      });
+      // force: hned nový stav (ne 15s cache) — jinak platba dál hlásí chybějící dokumenty
+      await refreshMe({ force: true });
+      toast(`Potvrzeno (${res.recorded.length} dokumentů)`);
+      if (!(me.missingConsents || []).length && guardOk) location.hash = '#/platba';
+      else render();
+    } catch (err) {
+      btn.disabled = false; btn.textContent = 'Potvrdit souhlasy';
+      toast(err.message, true);
     }
-    if (rd.dayState && !rd.dayState.opened) {
-      readiness.append(el('p', { class: 'small muted', text: 'Provozní den zatím není otevřen — vstup je možný jen při zaznamenané vyhovující denní kontrole a přítomnosti dozoru.' }));
-    }
-    if (rd.guardian && rd.guardian.required && !rd.guardian.relationVerified) {
-      readiness.append(el('p', { class: 'small muted', text: 'U nezletilého je potřeba, aby dozor ověřil vazbu zákonného zástupce podle dokladu (např. rodného listu). Elektronický souhlas rodiče to sám o sobě neprokazuje.' }));
-    }
-    if (rd.identity && !rd.identity.pinSet) {
-      readiness.append(el('p', { class: 'small muted', text: 'Nemáte nastavený vstupní PIN. Doporučujeme jej nastavit — u vstupu jej zadáte osobně a zabráníte tomu, aby vaši kartu použil někdo jiný.' }));
-    }
-  } catch (e) {
-    readiness.append(el('p', { class: 'muted small', text: 'Stav připravenosti se nepodařilo načíst.' }));
-  }
-  root.append(readiness);
+  });
 
-  // akce
-  const canContinue = totalMissing === 0 && (!guard || guard.guardianGranted);
-  if (allChecks.length === 0 && !canContinue && guard && !guard.guardianGranted) {
-    // zbývá jen souhlas rodiče — CTA na platbu zatím ne
-  }
-  if (allChecks.length) {
-    // Potvrzení dokumentů vyžaduje OVĚŘENÍ, že je potvrzuje sám účastník:
-    // heslo účtu, nebo jednorázový kód zaslaný na jeho e-mail. Bráníme tím tomu,
-    // aby dokumenty odklikl někdo jiný u odemčeného zařízení přihlášeného účtu.
-    const passInput = el('input', { class: 'input', type: 'password', placeholder: 'Vaše heslo k účtu', autocomplete: 'current-password' });
-    const codeInput = el('input', { class: 'input', type: 'text', inputmode: 'numeric', placeholder: 'Ověřovací kód z e-mailu (6 číslic)' });
-    const codeBtn = el('button', { class: 'btn ghost small', type: 'button' }, [ico('mail', 15), ' Poslat ověřovací kód na e-mail']);
-    codeBtn.addEventListener('click', async () => {
-      codeBtn.disabled = true;
-      try {
-        const r = await API.post('/consent-code');
-        toast(r.message || 'Ověřovací kód odeslán na e-mail.');
-      } catch (err) { toast(err.message, true); }
-      finally { codeBtn.disabled = false; }
-    });
-    // Souhrnné potvrzení PŘEČTENÍ: bez něj nelze souhlasy uložit (a tím ani
-    // pokračovat k platbě). Není to formalita — váže se k auditu (kdo, kdy, IP).
-    const confirmBox = el('label', { class: 'check confirm-check' }, [
-      el('input', { type: 'checkbox', id: 'doc-confirm' }),
-      el('span', {}, [
-        el('span', { class: 'check-title', text: 'Potvrzuji, že jsem si všechny dokumenty pečlivě přečetl(a) a rozumím jim.' }),
-      ]),
-    ]);
-    const confirmInput = $('input', confirmBox);
-    confirmInput.addEventListener('change', () => {
-      confirmBox.classList.toggle('checked', confirmInput.checked);
-      confirmBox.classList.remove('err');
-    });
+  root.append(el('div', { class: 'card flow-card' }, [
+    el('div', { class: 'flow-sec' }, [el('span', { class: 'flow-n', text: '1' }), el('h3', { text: 'Přečti a označ dokumenty' }), counter]),
+    list,
+    el('div', { class: 'flow-row' }, [allBtn, el('span', { class: 'muted tiny', text: 'Každé potvrzení se ukládá s verzí a otiskem znění, časem a IP adresou.' })]),
+    el('div', { class: 'flow-sec' }, [el('span', { class: 'flow-n', text: '2' }), el('h3', { text: 'Ověř, že jsi to ty' })]),
+    el('div', { class: 'code-row' }, [codeInput, codeBtn]),
+    passToggle, passWrap,
+    btn,
+    el('p', { class: 'muted tiny', style: 'text-align:center;margin-top:10px', text: 'Na místě tě ještě čeká krátká instruktáž u dozoru — tu zaznamená dozor.' }),
+  ]));
+  root.append(dokladDetails());
+}
 
-    root.append(el('div', { class: 'card' }, [
-      el('h3', { text: 'Ověření, že dokumenty potvrzujete vy' }),
-      el('p', { class: 'muted small', text: 'Potvrzení se ukládá s vaší identitou, časem serveru a IP adresou. Zadejte heslo k účtu — nebo si nechte poslat jednorázový kód na svůj e-mail. Bez ověření dokumenty uložit nelze.' }),
-      el('div', { class: 'form-row' }, [passInput, codeInput]),
-      el('div', { class: 'row-gap' }, [codeBtn]),
-      confirmBox,
-    ]));
-    const btn = el('button', { class: 'btn', type: 'button', text: 'Uložit vybrané souhlasy' });
-    btn.addEventListener('click', async () => {
-      const docKeys = allChecks.filter((c) => $('input', c).checked).map((c) => $('input', c).value);
-      if (!docKeys.length) { toast('Zaškrtněte dokumenty, se kterými souhlasíte', true); return; }
-      if (!confirmInput.checked) {
-        confirmBox.classList.add('err');
-        confirmBox.scrollIntoView({ block: 'center' });
-        toast('Potvrďte prosím, že jste si dokumenty přečetl(a) a rozumíte jim — bez toho souhlasy uložit nelze.', true);
-        return;
-      }
-      if (!passInput.value && !codeInput.value) {
-        toast('Zadejte heslo nebo ověřovací kód z e-mailu — potvrzujete tím, že dokumenty potvrzujete vy osobně.', true);
-        return;
-      }
-      btn.disabled = true; btn.textContent = 'Ukládám potvrzení…';
-
-      try {
-        const res = await API.post('/consent', {
-          docKeys,
-          password: passInput.value || undefined,
-          code: codeInput.value ? codeInput.value.trim() : undefined,
-        });
-        passInput.value = ''; codeInput.value = '';
-        // force: po uložení chceme OKAMŽITĚ nový stav (ne 15s cache) — jinak
-        // stránka platby dál hlásí chybějící dokumenty.
-        await refreshMe({ force: true });
-        toast(`Potvrzení zaznamenáno (${res.recorded.length} dokumentů)`);
-        if (res.instructionCompleted === false) {
-          toast('Pozor: potvrzené dokumenty ještě neznamenají připravenost ke skoku — chybí praktická instruktáž u dozora.', true);
-        }
-        location.hash = '#/souhlasy';
-        render();
-      } catch (err) {
-        btn.disabled = false; btn.textContent = 'Uložit vybrané souhlasy';
-        toast(err.message, true);
-      }
-    });
-    root.append(btn);
-  }
-
-  if (canContinue) {
-    root.append(el('a', { class: 'btn', href: '#/platba', text: 'Dokončeno — pokračovat k platbě →' }));
-  } else if (!allChecks.length) {
-    root.append(el('p', { class: 'muted small', style: 'text-align:center', text: guard && !guard.guardianGranted ? 'Po potvrzení rodiče zde dokončíte nákup.' : 'Po uložení souhlasů můžete pokračovat k platbě.' }));
-  }
-
-  // DOKLAD O PODPISU: co jsem podepsal(a), s jakým zněním, kdy a odkud + protokol k tisku
-  root.append(await signedDocsCard());
+/** Doklad o podpisu — sbalený dole, ať neruší hlavní krok. */
+function dokladDetails() {
+  const det = el('details', { class: 'doklad' }, [el('summary', { text: 'Doklad o podepsaných dokumentech' })]);
+  let loaded = false;
+  det.addEventListener('toggle', async () => {
+    if (!det.open || loaded) return;
+    loaded = true;
+    det.append(await signedDocsCard());
+  });
+  return det;
 }
 
 /* ---------- NÁHLED DOKUMENTU (naformátovaný text + tisk) ---------- */
@@ -469,68 +383,25 @@ async function viewPayment() {
     }
   }
 
-  /* ================= HERO: stav registrace + vysvětlení výhod členství ================= */
-  const hero = el('section', { class: 'hero-full pay-hero' }, [
-    el('div', { class: 'hero-inner' }, [
-      el('span', {
-        class: 'pill ' + (registrationDone ? 'ok' : 'wait'),
-        text: registrationDone ? 'Registrace dokončena' : `Registrace nedokončená — krok ${stepIdx + 1} ze 4`,
-      }),
-      el('h1', { text: registrationDone ? 'Registrace je hotová' : 'Dokončete registraci' }),
-      el('p', {
-        class: 'lead',
-        text: registrationDone
-          ? `Máte aktivní vstup. Další denní vstup si můžete koupit kdykoli — jako člen za ${priceKc(memberEntry)}, bez členství za ${priceKc(guestEntry)}.`
-          : 'Zbývá poslední krok — platba. Vyberte si, jestli chcete členství TJK, nebo jednorázový vstup.',
-      }),
-      el('div', { class: 'reg-progress' }, [
-        el('div', { class: 'track' }, [el('span', { class: 'fill', style: `width:${Math.round((stepIdx / REG_STEPS.length) * 100)}%` })]),
-        el('span', { class: 'reg-progress-label', text: `${stepIdx} ze 4 kroků hotovo` }),
-      ]),
-      regSteps(stepIdx),
-      el('div', { class: 'hero-stats' }, [
-        el('div', { class: 'hero-stat member' }, [
-          el('span', { class: 'hs-label', text: 'Denní vstup jako člen' }),
-          el('span', { class: 'hs-value', text: priceKc(memberEntry) }),
-        ]),
-        el('div', { class: 'hero-stat guest' }, [
-          el('span', { class: 'hs-label', text: 'Denní vstup bez členství' }),
-          el('span', { class: 'hs-value', text: priceKc(guestEntry) }),
-        ]),
-        el('div', { class: 'hero-stat' }, [
-          el('span', { class: 'hs-label', text: 'Členství TJK' }),
-          el('span', { class: 'hs-value' }, [el('em', { text: String(membershipPrice) }), ' Kč/rok']),
-        ]),
-      ]),
-      el('p', { class: 'hero-claim' }, [
-        ico('info', 15),
-        el('span', {
-          text: (memberEntry != null && guestEntry != null)
-            ? `Členství se vyplatí hned při prvním vstupu: ${fmtCzk(membershipPrice)} za rok + ${fmtCzk(memberEntry)} za vstup = ${fmtCzk(membershipPrice + memberEntry)} — tedy méně, než kolik stojí jediný vstup bez členství (${fmtCzk(guestEntry)}).`
-            : 'Jako člen TJK platíte za denní vstup výrazně méně než nečlen a navíc máte rezervace časových slotů a členskou kartu s QR kódem.',
-        }),
-      ]),
-    ]),
-  ]);
-
+  /* ================= HLAVIČKA: krok 3 průvodce (zjednodušeno 2026-10-29) ================= */
+  const head = [
+    el('h1', { text: registrationDone ? 'Vstupy a členství' : 'Platba' }),
+    el('p', { class: 'muted', text: registrationDone
+      ? (isMember ? `Jsi člen do ${fmtDate(m.validUntil)}. Další vstup si můžeš koupit kdykoli.` : 'Máš aktivní vstup. Další si můžeš koupit kdykoli.')
+      : 'Poslední krok — vyber, co chceš, a zaplať. QR karta se aktivuje hned po platbě.' }),
+    registrationDone ? null : regSteps(stepIdx),
+  ].filter(Boolean);
   const body = el('div', {});
-
-  /* ================= STAV UŽIVATELE (ČLEN / NEČLEN) ================= */
-  const statusText = isMember
-    ? `Členství je platné do ${fmtDate(m.validUntil)}.`
-    : membershipStatus === 'MEMBERSHIP_PENDING'
-      ? 'Rozpracované členství — dokončete dokumenty a platbu.'
-      : membershipStatus === 'MEMBERSHIP_EXPIRED'
-        ? 'Členství vypršelo — obnovte ho a získáte zpět členské ceny.'
-        : accessOk
-          ? 'Nečlen s aktivním jednorázovým vstupem.'
-          : 'Nečlen — členství se vyplatí už při prvním vstupu.';
-  body.append(el('div', { class: 'alert ' + (isMember ? 'ok' : 'warn') }, [
-    el('span', {}, [
-      el('strong', { text: `${memLabel} · ${ageLabel}` }),
-      el('span', { text: ' — ' + statusText }),
-    ]),
-  ]));
+  if (registrationDone) {
+    body.append(el('div', { class: 'card flow-card flow-done' }, [
+      el('span', { class: 'done-ic' }, [ico('check', 22)]),
+      el('div', {}, [
+        el('h3', { text: isMember ? 'Členství je aktivní' : 'Vstup je aktivní' }),
+        el('p', { class: 'muted small', text: `${memLabel} · ${ageLabel}${isMember ? ` · platí do ${fmtDate(m.validUntil)}` : ''}` }),
+      ]),
+      el('a', { class: 'btn', href: '#/karta' }, [ico('qr', 16), 'Moje QR karta']),
+    ]));
+  }
 
   /* ================= BLOKÁTOR: chybějící souhlasy / souhlas rodiče ================= */
   if (blocked) {
@@ -540,13 +411,12 @@ async function viewPayment() {
         el('h3', { text: guardianPending ? 'Čeká se na souhlas zákonného zástupce' : 'Nejdřív potvrďte souhlasy' }),
         el('p', { class: 'muted small', text: guardianPending
           ? `Dokud rodič nepotvrdí souhlas, nelze registraci dokončit ani zaplatit. Odkaz jsme poslali na ${m.guardianEmail || 'e-mail zákonného zástupce'}.`
-          : 'Bez potvrzených dokumentů nelze registraci dokončit ani zaplatit. Zbývá potvrdit:' }),
+          : 'Než zaplatíš, potvrď prosím dokumenty spolku. Zbývá:' }),
         consentsMissing ? el('ul', { class: 'missing-docs' }, (me.missingConsents || []).map((k) => el('li', { text: docLabel(k, docTitles) }))) : null,
         el('a', { class: 'btn small', href: '#/souhlasy', text: guardianPending ? 'Zobrazit stav souhlasu' : 'Dokončit souhlasy' }),
       ]),
     ]));
-    body.append(el('p', { class: 'muted small', text: 'Variantu (členství × jednorázový vstup) vyberete hned po dokončení souhlasů.' }));
-    root.append(hero, body);
+    root.append(...head, body);
     return;
   }
 
@@ -710,7 +580,7 @@ async function viewPayment() {
         el('span', { class: 'pv-ico' }, [ico(kind === 'no' ? 'x' : 'check', 12)]),
         el('span', { text: txt }),
       ]))) : null,
-      d.foot ? el('div', { class: 'variant-foot' }, d.foot) : null,
+      d.foot && d.locked ? el('div', { class: 'variant-foot' }, d.foot) : null,
     ]);
   }
 
@@ -722,18 +592,22 @@ async function viewPayment() {
   }
 
   if (variants.length) {
+    const vyhoda = (!isMember && memberEntry != null && guestEntry != null)
+      ? el('p', { class: 'pay-tip' }, [ico('zap', 15), el('span', { text: `Členství se vyplatí hned napoprvé: ${fmtCzk(membershipPrice)} + vstup ${fmtCzk(memberEntry)} = ${fmtCzk(membershipPrice + memberEntry)}, bez členství stojí vstup ${fmtCzk(guestEntry)}.` })])
+      : null;
     body.append(
-      el('h2', { text: 'Vyberte si variantu' }),
-      el('p', { class: 'muted small', text: 'Klikněte na jednu z možností a dole ji potvrďte tlačítkem. Zaplatíte jen to, co si vyberete.' }),
+      el('h2', { text: registrationDone ? 'Koupit další vstup' : 'Co chceš zaplatit?' }),
+      vyhoda,
       grid, cta
     );
-    // jediná volba (typicky člen) → předvybrat, ať je tlačítko hned připravené
-    if (variants.length === 1) pick(variants[0].card, variants[0].v);
+    // předvýběr: jediná volba, nebo záměr z registrace (členství / jednorázový vstup)
+    let want = null;
+    try { want = sessionStorage.getItem('tj_intent'); } catch (e) { /* noop */ }
+    const pre = variants.length === 1 ? variants[0]
+      : variants.find((x) => (want === 'vstup' ? x.v.purpose === 'produkt' : x.v.purpose === 'prispevek'));
+    if (pre) pick(pre.card, pre.v);
   } else {
-    body.append(
-      el('h2', { text: 'Vyberte si variantu' }),
-      el('div', { class: 'card soft' }, [el('p', { class: 'muted small', text: 'Aktuálně není co zakoupit. Zkuste to prosím později, nebo nás kontaktujte.' })])
-    );
+    body.append(el('div', { class: 'card soft' }, [el('p', { class: 'muted small', text: 'Aktuálně není co zakoupit. Zkuste to prosím později, nebo nás kontaktujte.' })]));
   }
 
   /* ================= HISTORIE PLATEB ================= */
@@ -742,9 +616,8 @@ async function viewPayment() {
     : p.purpose === 'produkt' ? `Jednorázový vstup — ${p.productCode || ''}`.trim()
       : p.purpose === 'merch' ? 'Merch' : p.purpose;
   const statusLabel = (s) => s === 'paid' ? 'Zaplaceno' : s === 'pending' ? 'Čeká na platbu' : s;
-  const history = el('div', { class: 'card soft' }, [el('h3', { text: 'Historie plateb' })]);
   const pays = me.payments || [];
-  if (!pays.length) history.append(el('div', { class: 'empty', text: 'Zatím žádné platby.' }));
+  const history = el('details', { class: 'doklad' }, [el('summary', { text: `Historie plateb (${pays.length})` })]);
   for (const p of pays) {
     history.append(el('div', { class: 'list-row' }, [
       el('div', {}, [
@@ -754,12 +627,12 @@ async function viewPayment() {
       el('span', { class: `tag ${p.status === 'paid' ? 'ok' : p.status === 'pending' ? 'blue' : 'bad'}`, text: statusLabel(p.status) }),
     ]));
   }
-  body.append(history);
+  if (pays.length) body.append(history);
 
   // ── JEDINÁ zmínka o platební bráně na celé stránce (ať se to neopakuje u každé platby)
   body.append(el('div', { class: 'pay-note' }, [ico('card', 16), el('span', { text: gatewayNote })]));
 
-  root.append(hero, body);
+  root.append(...head, body);
 }
 
 /* ---------- platební brána (simulace) ---------- */

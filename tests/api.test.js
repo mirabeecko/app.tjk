@@ -320,10 +320,11 @@ async function main() {
   });
   check('Souhlas rodiče zaznamenán (1 dokument)', gConsent.ok === true && gConsent.recorded.length === 1);
   check('Souhlas rodiče: vazba k dítěti zatím NEOVĚŘENA', gConsent.verification && gConsent.verification.relationVerified === false);
-  const gText = await api('GET', `/api/docs?slim=1`);
+  // /api/docs je jen pro přihlášené (2026-10-29) — rodič dostává znění přes svůj odkaz
+  check('Dokumenty bez přihlášení nejsou dostupné (401)', (await api('GET', '/api/docs')).error === 'NEJSTE_PRIHLASENI');
   check('Text souhlasu zástupce neobsahuje vzdání se práv dítěte',
     await (async () => {
-      const full = (await api('GET', '/api/docs')).docs.find((d) => d.docKey === 'guardian_souhlas');
+      const full = (gInfo.docs || []).find((d) => d.docKey === 'guardian_souhlas');
       return full && !/vzdávám se práva na náhradu újmy|2925/i.test(full.content)
         && /nevzdávám žádného práva nezletilého/i.test(full.content);
     })());

@@ -168,7 +168,7 @@ async function viewLanding() {
       el('div', { class: 'reg' }, [
         el('ol', { class: 'k-steps' }, [
           ['Registrace', 'jméno, datum narození, e-mail a telefon. Podle věku se nastaví kategorie a u nezletilých režim souhlasu zákonného zástupce.'],
-          ['Souhlasy', 'provozní řád, čestné prohlášení o zdravotní způsobilosti, poučení o rizicích a GDPR. Každý souhlas se ukládá s časem a verzí dokumentu.'],
+          ['Souhlasy', 'po registraci si v aplikaci přečteš a potvrdíš dokumenty spolku — jedním ověřovacím kódem z e-mailu.'],
           ['Platba', 'členství TJ Krupka nebo jednorázový vstup. Členové mají vstup za zvýhodněnou cenu.'],
           ['QR karta', 'v aplikaci vznikne karta s QR kódem. Ukážeš ji dozoru na místě a jdeš do rotace.'],
         ].map(([b, s]) => el('li', {}, [el('span', {}, [el('b', { text: b }), ` — ${s}`])]))),
@@ -191,24 +191,8 @@ async function viewLanding() {
       ]),
     ]);
 
-    const bezpecnost = el('section', { class: 'sec' }, [
-      secHead('shield', 'Bezpečnost', 'Bez výbavy se', 'neskáče', 'Provoz se řídí provozním řádem spolku. Dozor kontroluje výbavu i QR kartu před vstupem do rotace.'),
-      el('div', { class: 'two' }, [
-        el('div', { class: 'cell' }, [
-          el('h3', { text: 'Povinná výbava' }),
-          el('ul', { class: 'list' }, ['Přilba (na MTB a BMX fullface)', 'Chránič páteře', 'Chrániče kolen a loktů', 'Rukavice a pevná obuv']
-            .map((s) => el('li', {}, [ico('check', 16), s]))),
-        ]),
-        el('div', { class: 'cell' }, [
-          el('h3', { text: 'Pravidla na matraci' }),
-          el('ul', { class: 'list' }, [['Na matraci vždy jen jeden jezdec', 1], ['Po dopadu matraci hned opustit', 1], ['Salta a triky jen v řízeném bloku', 1], ['Žádný alkohol ani látky snižující pozornost', 0]]
-            .map(([s, ok]) => el('li', { class: ok ? '' : 'no' }, [ico(ok ? 'check' : 'x', 16), s]))),
-        ]),
-      ]),
-      el('div', { class: 'callout' }, [ico('alert', 19), el('span', {}, [el('b', { text: 'Airbag riziko snižuje, neodstraňuje. ' }), 'Jezdí se na vlastní odpovědnost, v rámci pravidel a v povinné výbavě. ', el('a', { href: '#/podminky', text: 'Provozní řád a podmínky →' })])]),
-    ]);
-
-    root.append(hero, marquee(), sekceTerminy(terminy), kroky, bezpecnost, sekceVyhody);
+    // Pravidla a dokumenty k odsouhlasení se ukazují až po přihlášení (zadání 2026-10-29)
+    root.append(hero, marquee(), sekceTerminy(terminy), kroky, sekceVyhody);
     return;
   }
 
@@ -441,80 +425,74 @@ async function viewRegister() {
   const root = $('#view');
   root.innerHTML = '';
 
-  const brand = el('a', { class: 'auth-brand', href: '#/' }, [
-    el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'brand-logo' }),
-    el('span', { class: 'auth-brand-text' }, [
-      el('strong', { text: 'Tělovýchovná jednota Krupka' }),
-      el('small', { text: 'členská aplikace' }),
-    ]),
-  ]);
-
-  // Záměr z úvodu (členství × jednorázový vstup) — jen UX, registrace je společná
+  // Záměr z úvodu (členství × jednorázový vstup) — přepínač nahoře, jde změnit i tady
   let intent = 'clenstvi';
   try { intent = sessionStorage.getItem('tj_intent') || 'clenstvi'; } catch (e) { /* noop */ }
-  const dailyIntent = intent === 'vstup';
-  const intentNote = dailyIntent
-    ? 'Registrujete se pro jednorázový vstup na airbag. Po registraci udělíte souhlasy a koupíte si denní vstup (600 Kč, pro členy 300 Kč). Mladiství pokračují přes souhlas zákonného zástupce.'
-    : 'Registrujete se pro členství TJK. Po registraci udělíte souhlasy a zaplatíte členský příspěvek (200 Kč/rok). Kategorie se určí sama podle data narození — nezletilí potřebují souhlas rodiče.';
+  let dailyIntent = intent === 'vstup';
 
-  const card = el('div', { class: 'auth-card' }, [
-    el('h1', { text: dailyIntent ? 'Registrace pro jednorázový vstup' : 'Registrace pro členství TJK' }),
-    el('p', { class: 'muted', text: intentNote }),
-  ]);
+  const seg = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Co chcete' });
+  const segOpt = (val, title, sub) => {
+    const b = el('button', { type: 'button', class: 'seg-opt' + ((val === 'vstup') === dailyIntent ? ' on' : ''), role: 'radio' }, [
+      el('b', { text: title }), el('small', { text: sub }),
+    ]);
+    b.addEventListener('click', () => {
+      dailyIntent = val === 'vstup';
+      try { sessionStorage.setItem('tj_intent', val); } catch (e) { /* noop */ }
+      $$('.seg-opt', seg).forEach((x) => x.classList.toggle('on', x === b));
+    });
+    return b;
+  };
+  seg.append(
+    segOpt('clenstvi', 'Členství TJ Krupka', '200 Kč/rok · levnější vstupy, rezervace'),
+    segOpt('vstup', 'Jednorázový vstup', 'bez členství, platíš za každý vstup'),
+  );
 
-  const form = el('form', { id: 'reg-form' }, [
-    el('div', { class: 'card auth-section' }, [
-      el('h3', { text: 'Osobní údaje' }),
-      el('div', { class: 'form-grid' }, [
-        el('div', {}, [el('label', { text: 'Jméno' }), el('input', { type: 'text', name: 'firstName', required: true, autocomplete: 'given-name' })]),
-        el('div', {}, [el('label', { text: 'Příjmení' }), el('input', { type: 'text', name: 'lastName', required: true, autocomplete: 'family-name' })]),
-        el('div', {}, [el('label', { text: 'Datum narození' }), el('input', { type: 'date', name: 'birthDate', required: true, max: new Date().toISOString().slice(0, 10) })]),
-        el('div', {}, [el('label', { text: 'E-mail' }), el('input', { type: 'email', name: 'email', required: true, autocomplete: 'email' })]),
-        el('div', { class: 'full' }, [el('label', { text: 'Ulice a číslo popisné' }), el('input', { type: 'text', name: 'street', required: true })]),
-        el('div', {}, [el('label', { text: 'Město' }), el('input', { type: 'text', name: 'city', required: true })]),
-        el('div', {}, [el('label', { text: 'PSČ' }), el('input', { type: 'text', name: 'zip', required: true, inputmode: 'numeric' })]),
-        el('div', { class: 'full' }, [el('label', { text: 'Telefon (volitelné)' }), el('input', { type: 'tel', name: 'phone' })]),
-        el('div', {}, [el('label', { text: 'Pohlaví (volitelné, pro statistiky)' }), el('select', { name: 'gender' }, ['', 'muz', 'zena'].map((o) => el('option', { value: o, text: o === '' ? '—' : o === 'muz' ? 'Muž' : 'Žena' })))]),
-        el('div', { class: 'full' }, [
-          el('label', { text: 'Fotografie (povinné)' }),
-          el('div', { class: 'photo-upload' }, [
-            el('input', { type: 'file', id: 'reg-photo', name: 'photoFile', accept: 'image/*', style: 'display:none' }),
-            el('div', { id: 'reg-photo-preview', class: 'photo-preview', text: 'Vybrat fotografii' }),
-            el('button', { type: 'button', class: 'btn small', text: 'Nahrát fotografii', onclick: () => $('#reg-photo').click() }),
-            el('p', { class: 'muted small', text: 'Nahrajte portrétovou fotku (JPG/PNG/WebP, max 3 MB). Fotku v aplikaci automaticky zmenšíme.' }),
-          ]),
-        ]),
+  const fld = (label, input, cls) => el('div', { class: 'fld' + (cls ? ' ' + cls : '') }, [el('label', { text: label }), input]);
+  const form = el('form', { id: 'reg-form', class: 'card flow-card' }, [
+    el('div', { class: 'flow-sec' }, [el('span', { class: 'flow-n', text: '1' }), el('h3', { text: 'Co chceš?' })]),
+    seg,
+    el('div', { class: 'flow-sec' }, [el('span', { class: 'flow-n', text: '2' }), el('h3', { text: 'Tvoje údaje' })]),
+    el('div', { class: 'form-grid' }, [
+      fld('Jméno', el('input', { type: 'text', name: 'firstName', required: true, autocomplete: 'given-name' })),
+      fld('Příjmení', el('input', { type: 'text', name: 'lastName', required: true, autocomplete: 'family-name' })),
+      fld('Datum narození', el('input', { type: 'date', name: 'birthDate', required: true, max: new Date().toISOString().slice(0, 10) })),
+      fld('E-mail', el('input', { type: 'email', name: 'email', required: true, autocomplete: 'email' })),
+      fld('Ulice a číslo popisné', el('input', { type: 'text', name: 'street', required: true, autocomplete: 'street-address' }), 'full'),
+      fld('Město', el('input', { type: 'text', name: 'city', required: true, autocomplete: 'address-level2' })),
+      fld('PSČ', el('input', { type: 'text', name: 'zip', required: true, inputmode: 'numeric', autocomplete: 'postal-code' })),
+      fld('Telefon (nepovinné)', el('input', { type: 'tel', name: 'phone', autocomplete: 'tel' })),
+      fld('Pohlaví (nepovinné)', el('select', { name: 'gender' }, ['', 'muz', 'zena'].map((o) => el('option', { value: o, text: o === '' ? '—' : o === 'muz' ? 'Muž' : 'Žena' })))),
+    ]),
+    el('div', { id: 'age-category' }),
+    el('div', { class: 'flow-sec' }, [el('span', { class: 'flow-n', text: '3' }), el('h3', { text: 'Fotka na kartu' })]),
+    el('div', { class: 'photo-upload' }, [
+      el('input', { type: 'file', id: 'reg-photo', name: 'photoFile', accept: 'image/*', style: 'display:none' }),
+      el('div', { id: 'reg-photo-preview', class: 'photo-preview', text: 'Bez fotky', onclick: () => $('#reg-photo').click() }),
+      el('div', {}, [
+        el('button', { type: 'button', class: 'btn small', text: 'Vybrat fotku', onclick: () => $('#reg-photo').click() }),
+        el('p', { class: 'muted small', text: 'Portrét, podle kterého tě dozor pozná. Zmenšíme ji automaticky.' }),
       ]),
     ]),
-
-    el('div', { class: 'card auth-section' }, [
-      el('h3', { text: 'Kategorie členství' }),
-      el('p', { class: 'muted', text: 'Určí se automaticky podle věku. Všechny kategorie stojí stejně: 200 Kč ročně.' }),
-      el('div', { id: 'age-category' }),
-    ]),
-
-    el('div', { class: 'card auth-section', id: 'guardian-card', hidden: true }, [
-      el('h3', { text: 'Zákonný zástupce (rodič)' }),
-      el('p', { class: 'guardian-note', text: 'Nezletilý člen potřebuje souhlas zákonného zástupce. Vyplňte prosím údaje rodiče — na jeho e-mail zašleme bezpečný odkaz k elektronickému podpisu souhlasu (platí 7 dní).' }),
+    el('div', { id: 'guardian-card', class: 'guardian-box', hidden: true }, [
+      el('div', { class: 'flow-sec' }, [el('span', { class: 'flow-n', text: '4' }), el('h3', { text: 'Zákonný zástupce' })]),
+      el('p', { class: 'muted small', text: 'Jsi mladší 18 let — rodiči pošleme e-mailem odkaz, kterým tvou účast potvrdí (platí 7 dní).' }),
       el('div', { class: 'form-grid' }, [
-        el('div', { class: 'full' }, [el('label', { text: 'Jméno a příjmení zákonného zástupce' }), el('input', { type: 'text', name: 'guardianName' })]),
-        el('div', {}, [el('label', { text: 'Vztah k dítěti' }), el('select', { name: 'guardianRelation' }, ['matka', 'otec', 'jiný zákonný zástupce'].map((o) => el('option', { value: o, text: o })))]),
-        el('div', {}, [el('label', { text: 'E-mail zákonného zástupce' }), el('input', { type: 'email', name: 'guardianEmail' })]),
-        el('div', { class: 'full' }, [el('label', { text: 'Telefon zákonného zástupce (volitelné)' }), el('input', { type: 'tel', name: 'guardianPhone' })]),
+        fld('Jméno a příjmení rodiče', el('input', { type: 'text', name: 'guardianName' }), 'full'),
+        fld('Vztah', el('select', { name: 'guardianRelation' }, ['matka', 'otec', 'jiný zákonný zástupce'].map((o) => el('option', { value: o, text: o })))),
+        fld('E-mail rodiče', el('input', { type: 'email', name: 'guardianEmail' })),
+        fld('Telefon rodiče (nepovinné)', el('input', { type: 'tel', name: 'guardianPhone' }), 'full'),
       ]),
     ]),
-
-    el('button', { class: 'btn btn-cta btn-block', type: 'submit', text: 'Odeslat registraci' }),
+    el('button', { class: 'btn btn-cta btn-block', type: 'submit', text: 'Pokračovat k souhlasům →' }),
+    el('p', { class: 'auth-switch' }, ['Už máš účet? ', el('a', { href: '#/prihlaseni', text: 'Přihlásit se' })]),
   ]);
 
-  card.append(form);
-
-  const switchLink = el('p', { class: 'auth-switch' }, [
-    'Už jste členem? ',
-    el('a', { href: '#/prihlaseni', text: 'Přihlásit se' }),
-  ]);
-
-  root.append(brand, el('div', { class: 'auth-wrap auth-wide' }, [card, switchLink]));
+  root.append(
+    el('h1', { text: 'Registrace' }),
+    el('p', { class: 'muted', text: 'Tři rychlé kroky: údaje, souhlasy, platba. Pak máš v mobilu QR kartu pro vstup.' }),
+    regSteps(0),
+    form,
+  );
 
   const categoryBox = $('#age-category');
   const guardianCard = $('#guardian-card');
@@ -525,28 +503,14 @@ async function viewRegister() {
     const age = birthInput.value ? calcAge(birthInput.value) : null;
     categoryBox.innerHTML = '';
     if (age === null) {
-      categoryBox.append(el('div', { class: 'age-cat-hint', text: 'Vyplňte datum narození — kategorie se zobrazí sama.' }));
+      // kategorie se ukáže sama po vyplnění data narození
       guardianCard.hidden = true;
       return;
     }
     const code = membershipTypeForAge(age);
-    const categories = [
-      { code: 'dite', label: 'Dítě', range: 'do 15 let', icon: 'baby', note: 'Pouze s doprovodem zákonného zástupce (doprovod zdarma).' },
-      { code: 'mladez', label: 'Mládež', range: '15–18 let', icon: 'user', note: 'Se souhlasem zákonného zástupce.' },
-      { code: 'dospele', label: 'Dospělý', range: '18+ let', icon: 'users', note: 'Plné členství bez dalších podmínek.' },
-    ];
-    for (const c of categories) {
-      const active = c.code === code;
-      const box = el('div', { class: 'age-cat' + (active ? ' active' : '') }, [
-        el('span', { class: 'age-cat-ico', 'aria-hidden': 'true' }, [ico(c.icon)]),
-        el('div', { class: 'age-cat-body' }, [
-          el('strong', { text: `${c.label} (${c.range})` }),
-          el('small', { text: c.note }),
-        ]),
-        el('span', { class: 'age-cat-check', 'aria-hidden': 'true' }, active ? [ico('check')] : []),
-      ]);
-      categoryBox.append(box);
-    }
+    const CAT = { dite: ['Dítě (do 15 let)', 'jen s doprovodem zákonného zástupce'], mladez: ['Mládež (15–18 let)', 'se souhlasem zákonného zástupce'], dospele: ['Dospělý (18+)', 'bez dalších podmínek'] };
+    const [cl, cn] = CAT[code] || CAT.dospele;
+    categoryBox.append(el('div', { class: 'age-line' }, [ico('check', 15), el('span', {}, [el('b', { text: `Kategorie: ${cl}` }), ` — ${cn}`])]));
     const minor = age < 18;
     guardianCard.hidden = !minor;
     // povinné atributy jen když je rodič potřeba
@@ -631,7 +595,7 @@ async function viewRegister() {
       }
     } catch (err) {
       btn.disabled = false;
-      btn.textContent = 'Odeslat registraci';
+      btn.textContent = 'Pokračovat k souhlasům →';
       toast(err.message, true);
       if (err.data && err.data.missing) Object.entries(err.data.missing).forEach(([k, v]) => fieldError(form, k, v));
     }
