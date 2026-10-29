@@ -1,147 +1,283 @@
 // views-public.js — veřejné pohledy: úvod, registrace, přihlášení, souhlas rodiče.
 'use strict';
 
-/* ---------- ÚVOD (rozdělení: před / po přihlášení) ---------- */
+/* ---------- ÚVOD (design Komárka 2026: hero + termíny + rychlé akce) ---------- */
+const MESICE = ['ledna', 'února', 'března', 'dubna', 'května', 'června', 'července', 'srpna', 'září', 'října', 'listopadu', 'prosince'];
+const MESICE_1 = ['leden', 'únor', 'březen', 'duben', 'květen', 'červen', 'červenec', 'srpen', 'září', 'říjen', 'listopad', 'prosinec'];
+const DNY = ['neděle', 'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota'];
+const hhmm = (d) => d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+
+/** Termíny z /api/events — jen budoucí, seřazené. Při chybě prázdné pole. */
+async function nactiTerminy() {
+  try {
+    const res = await API.get('/events');
+    const now = Date.now();
+    return (res.events || [])
+      .filter((e) => new Date(e.endsAt || e.startsAt).getTime() > now)
+      .sort((x, y) => new Date(x.startsAt) - new Date(y.startsAt));
+  } catch (e) { return []; }
+}
+
+function terminKarta(e) {
+  const s = new Date(e.startsAt);
+  const k = e.endsAt ? new Date(e.endsAt) : null;
+  const full = e.capacity && e.spotsLeft === 0;
+  return el('article', { class: 'term' }, [
+    el('div', { class: 'date' }, [
+      el('span', { class: 'd', text: `${s.getDate()}.` }),
+      el('span', { class: 'md' }, [el('b', { text: MESICE_1[s.getMonth()] }), DNY[s.getDay()]]),
+    ]),
+    el('h4', { text: e.title }),
+    el('div', { class: 'info' }, [
+      el('span', { class: 'pill free' }, [ico('clock', 12), `${hhmm(s)}${k ? '–' + hhmm(k) : ''}`]),
+      el('span', { class: 'pill' }, [ico('pin', 12), e.facilityName || e.location || 'Dopadová matrace']),
+      full ? el('span', { class: 'pill full', text: 'Obsazeno' }) : null,
+    ]),
+    el('div', { class: 'foot' }, [
+      el('span', { class: 'spots' }, e.capacity
+        ? [el('b', { text: String(e.spotsLeft) }), ` z ${e.capacity} míst volných`]
+        : ['Volná kapacita']),
+      el('a', { class: 'btn primary sm', href: isLoggedIn() ? '#/rezervace' : '#/registrace' }, ['Rezervovat', ico('arrow', 15)]),
+    ]),
+  ]);
+}
+
+/** Hero obrázek matrace + plovoucí karta „nejbližší termín" (plní se asynchronně). */
+function heroArt(terminy) {
+  const next = el('div', { class: 'nextcard' }, [
+    el('span', { class: 'lbl' }, [ico('calendar', 12), 'Nejbližší termín']),
+    el('div', { class: 'big', text: 'Načítám termíny…' }),
+  ]);
+  terminy.then((list) => {
+    next.innerHTML = '';
+    const e = list[0];
+    next.append(el('span', { class: 'lbl' }, [ico('calendar', 12), 'Nejbližší termín']));
+    if (!e) {
+      next.append(el('div', { class: 'big', text: 'Termíny se připravují' }),
+        el('div', { class: 'meta', text: 'Vypisujeme je podle počasí. Volné skákání podle rezervace.' }),
+        el('a', { class: 'lnk', href: '#/rezervace' }, ['Volné sloty', ico('arrow', 14)]));
+      return;
+    }
+    const s = new Date(e.startsAt);
+    next.append(
+      el('div', { class: 'big', text: `${DNY[s.getDay()][0].toUpperCase()}${DNY[s.getDay()].slice(1)} ${s.getDate()}. ${MESICE[s.getMonth()]}` }),
+      el('div', { class: 'meta', text: `${e.title} · ${hhmm(s)}${e.capacity ? ` · ${e.spotsLeft} volných míst` : ''}` }),
+      el('a', { class: 'lnk', href: '#terminy', onclick: (ev) => { ev.preventDefault(); const t = $('#terminy'); if (t) t.scrollIntoView({ behavior: 'smooth' }); } }, ['Všechny termíny', ico('arrow', 14)]),
+    );
+  });
+  return el('div', { class: 'hero-art' }, [
+    el('div', { class: 'shot cutout' }, [
+      el('img', { src: '/img/airbag-matrace.webp', alt: 'Dopadová matrace Airbag Komárka', width: '650', height: '384', loading: 'eager' }),
+      el('span', { class: 'tag', text: 'Matrace Airbag Komárka · 10 × 5 × 2 m' }),
+    ]),
+    next,
+  ]);
+}
+
+function marquee() {
+  const words = ['MTB', 'Dirt', 'BMX', 'Koloběžky', 'Děti od 8 let', 'Dozor na místě', '10 m matrace', 'QR vstup', 'Doprovod zdarma'];
+  const track = el('div', { class: 'track' });
+  for (let i = 0; i < 2; i++) words.forEach((w) => track.append(el('span', { text: w })));
+  return el('div', { class: 'marquee', 'aria-hidden': 'true' }, [track]);
+}
+
+function secHead(icon, kicker, title, em, sub, extra) {
+  return el('div', { class: 'sec-head' }, [
+    el('div', { class: 'txt' }, [
+      el('span', { class: 'kicker' }, [ico(icon, 14), kicker]),
+      el('h2', {}, [title + ' ', el('em', { text: em })]),
+      sub ? el('p', { class: 'sub', text: sub }) : null,
+    ]),
+    extra || null,
+  ]);
+}
+
+function sekceTerminy(terminy) {
+  const grid = el('div', { class: 'terms' }, [el('div', { class: 'term skeleton' }), el('div', { class: 'term skeleton' }), el('div', { class: 'term skeleton' })]);
+  const status = el('span', { class: 'terms-status' }, [el('span', { class: 'dot' }), 'načítám…']);
+  terminy.then((list) => {
+    grid.innerHTML = '';
+    status.className = 'terms-status ' + (list.length ? 'live' : 'off');
+    status.lastChild.textContent = list.length ? `${list.length} ${list.length === 1 ? 'termín' : list.length < 5 ? 'termíny' : 'termínů'} v plánu` : 'zatím bez vypsaných termínů';
+    if (!list.length) {
+      grid.append(el('div', { class: 'cell empty-terms' }, [
+        el('span', { class: 'ic' }, [ico('calendar', 19)]),
+        el('h3', { text: 'Další termíny brzy' }),
+        el('p', { text: 'Akce vypisujeme podle počasí a obsazenosti. Mezitím si můžeš rezervovat volný slot na matraci.' }),
+        el('a', { class: 'btn sm', href: '#/rezervace' }, ['Volné sloty', ico('arrow', 15)]),
+      ]));
+      return;
+    }
+    list.slice(0, 6).forEach((e) => grid.append(terminKarta(e)));
+  });
+  return el('section', { class: 'sec', id: 'terminy' }, [
+    secHead('calendar', 'Termíny', 'Kdy se', 'skáče', 'Termíny vypisujeme podle počasí a obsazenosti. Rezervovat mohou aktivní členové spolku.', status),
+    grid,
+  ]);
+}
+
 async function viewLanding() {
   const root = $('#view');
   root.innerHTML = '';
+  root.classList.add('is-home');
+  const terminy = nactiTerminy();
 
-  const benefitsTitle = el('h2', { text: 'Členské výhody' });
-  const benefitsGrid = el('div', { class: 'benefit-grid' });
-  try {
-    const facilities = await loadFacilities();
-    for (const f of facilities) {
-      benefitsGrid.append(el('div', { class: 'benefit-card' }, [
-        el('span', { class: 'benefit-icon' }, [ico(f.icon || 'ticket')]),
-        el('div', { class: 'benefit-body' }, [
-          el('span', { class: 'benefit-name', text: f.name }),
-          el('span', { class: 'benefit-desc', text: f.description }),
-        ]),
-        el('a', { class: 'btn small ghost', href: '#/rezervace', text: 'Rezervovat →' }),
-      ]));
-    }
-  } catch (e) { /* offline */ }
-  benefitsGrid.append(el('div', { class: 'benefit-card benefit-more' }, [
-    el('span', { class: 'benefit-icon' }, [ico('arrow')]),
-    el('div', { class: 'benefit-body' }, [
-      el('span', { class: 'benefit-name', text: 'Další výhody' }),
-      el('span', { class: 'benefit-desc', text: 'Připravujeme další zařízení a služby pro členy.' }),
-    ]),
-  ]));
+  let facilities = [];
+  try { facilities = await loadFacilities(); } catch (e) { /* offline */ }
+  const sekceVyhody = el('section', { class: 'sec' }, [
+    secHead('zap', 'Členské výhody', 'Co spolek', 'nabízí', 'Zařízení a služby, které můžeš jako člen TJ Krupka využívat.'),
+    el('div', { class: 'disc' }, facilities.map((f) => el('div', { class: 'dcard' }, [
+      el('div', { class: 'top-line' }, [ico(f.icon || 'bike', 20), el('h3', { text: f.name })]),
+      el('p', { text: f.description || '' }),
+      el('div', { class: 'req' }, [el('b', { text: 'Rezervace: ' }), 'sloty po 60 minutách, na matraci vždy jeden jezdec.']),
+    ])).concat([el('div', { class: 'dcard soon' }, [
+      el('div', { class: 'top-line' }, [ico('arrow', 20), el('h3', { text: 'Další výhody' })]),
+      el('p', { text: 'Připravujeme další zařízení a služby pro členy spolku.' }),
+    ])])),
+  ]);
 
   if (!isLoggedIn()) {
-    /* ---------- NEPŘIHLÁŠENÝ: volba — ROČNÍ ČLENSTVÍ × JEDNORÁZOVÝ VSTUP ---------- */
+    /* ---------- NEPŘIHLÁŠENÝ: členství × jednorázový vstup ---------- */
+    root.classList.add('is-public');
     const intentStart = (intent) => {
       try { sessionStorage.setItem('tj_intent', intent); } catch (e) { /* noop */ }
       location.hash = '#/registrace';
     };
-    const hero = el('section', { class: 'hero-full' }, [
-      el('div', { class: 'hero-inner' }, [
-        el('img', { src: '/img/tjk-logo.png', alt: 'TJ Krupka', class: 'hero-logo' }),
-        el('span', { class: 'pill', text: 'Tělovýchovná jednota Krupka z.s.' }),
-        el('h1', { text: 'Airbag. Skoky. Tvoje volba.' }),
-        el('p', { class: 'lead', text: 'Dopadová matrace pro trénink MTB skoků. Staňte se členem TJK a užívejte členské výhody, nebo si kupte jednorázový vstup — v obou případech stačí registrace, souhlasy a platba.' }),
-        el('div', { class: 'hero-cta' }, [
-          el('button', { class: 'btn btn-lg', onclick: () => intentStart('clenstvi') }, [ico('shield', 17), ' ', 'Členství']),
-          el('button', { class: 'btn ghost-dark', onclick: () => intentStart('vstup') }, [ico('ticket', 17), ' ', 'Jednorázový vstup']),
-          el('a', { class: 'btn ghost-dark', href: '#/prihlaseni' }, [ico('key', 17), ' ', 'Mám účet — přihlásit']),
+    const hero = el('section', { class: 'k-hero' }, [
+      el('div', { class: 'k-hero-txt' }, [
+        el('span', { class: 'eyebrow' }, [ico('shield', 13), 'TJ Krupka · členská aplikace']),
+        el('h1', {}, ['Airbag ', el('span', { class: 'g', text: 'Komárka' })]),
+        el('p', { class: 'claim', text: 'Skákej bez rizika' }),
+        el('p', { class: 'lead', text: 'Vstup na dopadovou matraci, rezervace, souhlasy a QR karta na jednom místě. Staň se členem TJ Krupka, nebo si kup jednorázový vstup — v obou případech stačí registrace, souhlasy a platba.' }),
+        el('div', { class: 'hero-acts' }, [
+          el('button', { class: 'btn primary', onclick: () => intentStart('clenstvi') }, [ico('shield', 17), 'Chci členství']),
+          el('button', { class: 'btn pink', onclick: () => intentStart('vstup') }, [ico('ticket', 17), 'Jednorázový vstup']),
+          el('a', { class: 'btn', href: '#/prihlaseni' }, [ico('key', 17), 'Mám účet']),
         ]),
-        el('div', { class: 'hero-stats' }, [
-          el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Členství TJK' }), el('span', { class: 'hs-value' }, [el('em', { text: '1' }), ' sleva na den'])]),
-          el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Vstup AIRBAG — den' }), el('span', { class: 'hs-value', text: 'bez členství' })]),
-          el('div', { class: 'hero-stat' }, [el('span', { class: 'hs-label', text: 'Do QR karty' }), el('span', { class: 'hs-value' }, [el('em', { text: '4' }), ' kroky'])]),
+        el('div', { class: 'chips' }, [
+          el('span', { class: 'chip' }, [ico('edit', 14), 'Registrace ', el('b', { text: '2 min' })]),
+          el('span', { class: 'chip' }, [ico('qr', 14), 'Vstup ', el('b', { text: 'QR kartou' })]),
+          el('span', { class: 'chip' }, [ico('users', 14), 'Doprovod ', el('b', { text: 'zdarma' })]),
+        ]),
+      ]),
+      heroArt(terminy),
+    ]);
+
+    const kroky = el('section', { class: 'sec' }, [
+      secHead('edit', 'Registrace', 'Čtyři kroky a', 'jedeš', 'Nic se neinstaluje z obchodu — stačí prohlížeč v mobilu. Aplikaci si můžeš přidat na plochu.'),
+      el('div', { class: 'reg' }, [
+        el('ol', { class: 'k-steps' }, [
+          ['Registrace', 'jméno, datum narození, e-mail a telefon. Podle věku se nastaví kategorie a u nezletilých režim souhlasu zákonného zástupce.'],
+          ['Souhlasy', 'provozní řád, čestné prohlášení o zdravotní způsobilosti, poučení o rizicích a GDPR. Každý souhlas se ukládá s časem a verzí dokumentu.'],
+          ['Platba', 'členství TJ Krupka nebo jednorázový vstup. Členové mají vstup za zvýhodněnou cenu.'],
+          ['QR karta', 'v aplikaci vznikne karta s QR kódem. Ukážeš ji dozoru na místě a jdeš do rotace.'],
+        ].map(([b, s]) => el('li', {}, [el('span', {}, [el('b', { text: b }), ` — ${s}`])]))),
+        el('div', { class: 'price-side' }, [
+          el('h3', { text: 'Jak chceš skákat?' }),
+          el('div', { class: 'pick' }, [
+            el('button', { class: 'pick-opt', onclick: () => intentStart('clenstvi') }, [
+              el('span', { class: 'pick-ic' }, [ico('shield', 18)]),
+              el('span', {}, [el('b', { text: 'Členství TJ Krupka' }), el('small', { text: 'rezervace, QR karta, levnější vstupy' })]),
+              ico('arrow', 16),
+            ]),
+            el('button', { class: 'pick-opt pink' , onclick: () => intentStart('vstup') }, [
+              el('span', { class: 'pick-ic' }, [ico('ticket', 18)]),
+              el('span', {}, [el('b', { text: 'Jednorázový vstup' }), el('small', { text: 'bez členství, na jeden den' })]),
+              ico('arrow', 16),
+            ]),
+          ]),
+          el('p', { class: 'tiny muted', text: 'Mladiství potřebují souhlas zákonného zástupce — aplikace ho vyžádá e-mailem.' }),
         ]),
       ]),
     ]);
 
-    const steps = el('div', { class: 'steps' }, [
-      ['1', 'Registrace'], ['2', 'Souhlasy'], ['3', 'Platba'], ['4', 'QR karta'],
-    ].map(([n, t]) => el('div', { class: 'step' }, [el('div', { class: 'dot', text: n }), t])));
-
-    const choice = el('div', {}, [
-      el('h2', { text: 'Jak chcete airbag používat?' }),
-      el('p', { class: 'muted', text: 'Obojí začíná registrací (jméno, e-mail…) a souhlasem s provozním řádem. Mladiství potřebují souhlas zákonného zástupce.' }),
-      el('div', { class: 'grid-2' }, [
-        el('div', { class: 'card' }, [
-          el('div', { class: 'list-row' }, [el('strong', { text: 'Členství TJK' }), el('span', { class: 'pick-sub', text: 'členské výhody + sleva na den' })]),
-          el('p', { class: 'muted small', text: 'Přístup k zařízením spolku, rezervace, slevy na jednorázové vstupy, členská karta s QR. Nezletilí se souhlasem rodiče.' }),
-          el('button', { class: 'btn', onclick: () => intentStart('clenstvi') }, [ico('shield', 16), ' ', 'Chci členství']),
+    const bezpecnost = el('section', { class: 'sec' }, [
+      secHead('shield', 'Bezpečnost', 'Bez výbavy se', 'neskáče', 'Provoz se řídí provozním řádem spolku. Dozor kontroluje výbavu i QR kartu před vstupem do rotace.'),
+      el('div', { class: 'two' }, [
+        el('div', { class: 'cell' }, [
+          el('h3', { text: 'Povinná výbava' }),
+          el('ul', { class: 'list' }, ['Přilba (na MTB a BMX fullface)', 'Chránič páteře', 'Chrániče kolen a loktů', 'Rukavice a pevná obuv']
+            .map((s) => el('li', {}, [ico('check', 16), s]))),
         ]),
-        el('div', { class: 'card' }, [
-          el('div', { class: 'list-row' }, [el('strong', { text: 'Jednorázový vstup — AIRBAG' }), el('span', { class: 'pick-sub', text: 'bez členství' })]),
-          el('p', { class: 'muted small', text: 'Přístup k dopadové matraci bez členství. Mladiství se souhlasem zákonného zástupce. Členové TJK mají zvýhodněnou cenu.' }),
-          el('button', { class: 'btn', onclick: () => intentStart('vstup') }, [ico('ticket', 16), ' ', 'Chci jednorázový vstup']),
+        el('div', { class: 'cell' }, [
+          el('h3', { text: 'Pravidla na matraci' }),
+          el('ul', { class: 'list' }, [['Na matraci vždy jen jeden jezdec', 1], ['Po dopadu matraci hned opustit', 1], ['Salta a triky jen v řízeném bloku', 1], ['Žádný alkohol ani látky snižující pozornost', 0]]
+            .map(([s, ok]) => el('li', { class: ok ? '' : 'no' }, [ico(ok ? 'check' : 'x', 16), s]))),
         ]),
       ]),
+      el('div', { class: 'callout' }, [ico('alert', 19), el('span', {}, [el('b', { text: 'Airbag riziko snižuje, neodstraňuje. ' }), 'Jezdí se na vlastní odpovědnost, v rámci pravidel a v povinné výbavě. ', el('a', { href: '#/podminky', text: 'Provozní řád a podmínky →' })])]),
     ]);
 
-    const why = el('div', { class: 'card primary join-card' }, [
-      el('h2', { text: 'Proč se stát členem' }),
-      el('ul', { class: 'benefit-list' }, [
-        ['Přístup k členským zařízením spolku', 'check'],
-        ['Rezervace časových slotů dopředu', 'check'],
-        ['Digitální členská karta s QR kódem', 'check'],
-        ['Jednorázové vstupy za členské ceny', 'check'],
-      ].map(([t]) => el('li', {}, [el('span', { class: 'bl-check' }, [ico('check', 13)]), t]))),
-      el('button', { class: 'btn accent', onclick: () => intentStart('clenstvi') }, [ico('shield', 16), ' ', 'Stát se členem']),
-    ]);
-
-    const info = el('div', { class: 'card soft' }, [
-      el('h3', { text: 'Podmínky provozu' }),
-      el('p', { class: 'muted', text: 'Používání dopadové matrace se řídí provozním řádem. Vstup mají členové i nečlenové s jednorázovým vstupem. Každý účastník potvrzuje povinné dokumenty (provozní řád, poučení o rizicích a potvrzení pravidel účasti, čestné prohlášení, GDPR) s auditní stopou — navíc musí absolvovat praktickou instruktáž u dozora.' }),
-      el('button', { class: 'btn ghost small', text: 'Provozní řád a podmínky', onclick: () => { location.hash = '#/podminky'; } }),
-    ]);
-
-    root.append(hero, steps, choice, benefitsTitle, benefitsGrid, why, info);
+    root.append(hero, marquee(), sekceTerminy(terminy), kroky, bezpecnost, sekceVyhody);
     return;
   }
 
-  /* ---------- PŘIHLÁŠENÝ: členský dashboard ---------- */
+  /* ---------- PŘIHLÁŠENÝ: členský přehled ---------- */
   const m = me.member;
   const st = me.status;
   const kind = me.kind || 'neclen';            // 'clen' | 'neclen' (role uživatele)
   const isMember = kind === 'clen';
-  const ageLabel = (me.ageType === 'MINOR' ? 'Mladistvý' : (me.ageType === 'ADULT' ? 'Dospělý' : 'Dospělý'));
+  const ageLabel = (me.ageType === 'MINOR' ? 'Mladistvý' : 'Dospělý');
   const accessOk = !!me.access;
   const statusLine = isMember
-    ? `Členství je aktivní do ${fmtDate(m.validUntil)}.`
+    ? `Členství je aktivní do ${fmtDate(m.validUntil)}. QR karta platí pro vstup na matraci.`
     : accessOk
       ? 'Máte aktivní jednorázový vstup — QR karta platí pro vstup.'
-      : st === 'payment_pending' ? 'Čeká se na úhradu — dokončete platbu.'
-        : st === 'consent_pending' || st === 'guardian_pending' ? 'Dokončete prosím souhlasy.'
+      : st === 'payment_pending' ? 'Čeká se na úhradu — dokončete platbu a karta se aktivuje.'
+        : st === 'consent_pending' || st === 'guardian_pending' ? 'Dokončete prosím souhlasy — pak už jen platba.'
           : st === 'registered' ? 'Dokončete registraci — souhlasy a platba.'
-            : 'Nemáte aktivní členství ani vstup.';
+            : 'Nemáte aktivní členství ani vstup. Kupte si vstup nebo členství.';
+  const vok = (typeof CZ !== 'undefined' && CZ.vocative) ? CZ.vocative(m.firstName) : m.firstName;
 
-  const welcome = el('section', { class: 'hero hero-member' }, [
-    el('span', { class: 'pill', text: 'Členská aplikace' }),
-    // Oslovení 5. pádem — „Vítej, Petře“ (ne „Vítej, Petr“). Viz public/js/czech.js.
-    el('h1', { text: (typeof CZ !== 'undefined' ? CZ.greet(m.firstName) : `Vítej, ${m.firstName}`) }),
-    el('p', { class: 'muted', text: statusLine }),
-    el('div', { class: 'hero-status' }, [
-      el('span', { class: 'tag ' + (isMember ? 'ok' : 'warn'), text: isMember ? 'ČLEN' : 'NEČLEN' }),
-      el('span', { class: 'tag gray', text: ageLabel }),
-      el('a', { class: 'btn small', href: '#/platba', text: isMember ? 'Koupit jednorázový vstup' : 'Koupit vstup / členství' }),
-    ]),
-  ]);
-
-  const tiles = el('div', { class: 'tile-grid' }, [
-    el('a', { class: 'tile', href: '#/karta' }, [
-      el('span', { class: 'tile-icon green' }, [ico('ticket')]),
-      el('span', { class: 'tile-body' }, [
-        el('span', { class: 'tile-title', text: 'QR karta' }),
-        el('span', { class: 'tile-sub', text: 'Karta pro vstup' }),
+  const hero = el('section', { class: 'k-hero' }, [
+    el('div', { class: 'k-hero-txt' }, [
+      el('span', { class: 'eyebrow' }, [el('span', { class: 'live-dot' }), isMember ? 'Členství aktivní' : (accessOk ? 'Vstup aktivní' : 'Účet bez aktivního vstupu')]),
+      // Oslovení 5. pádem — „Vítej, Petře" (viz public/js/czech.js)
+      el('h1', {}, ['Vítej, ', el('span', { class: 'g', text: vok || '' })]),
+      el('p', { class: 'claim', text: 'Skákej bez rizika' }),
+      el('p', { class: 'lead', text: statusLine }),
+      el('div', { class: 'hero-acts' }, [
+        el('a', { class: 'btn primary', href: '#/karta' }, [ico('qr', 17), 'Moje QR karta']),
+        el('a', { class: 'btn', href: '#/rezervace' }, [ico('clock', 17), 'Rezervovat']),
+        el('a', { class: 'btn pink', href: '#/platba' }, [ico('ticket', 17), isMember ? 'Jednorázový vstup' : 'Koupit vstup / členství']),
+      ]),
+      el('div', { class: 'chips' }, [
+        el('span', { class: 'chip' }, [ico('user', 14), 'Uživatel ', el('b', { text: isMember ? 'Člen' : 'Nečlen' })]),
+        el('span', { class: 'chip' }, [ico('calendar', 14), 'Platnost ', el('b', { text: isMember && m.validUntil ? `do ${fmtDate(m.validUntil)}` : (accessOk ? 'dnes' : '—') })]),
+        el('span', { class: 'chip' }, [ico('baby', 14), 'Kategorie ', el('b', { text: ageLabel })]),
       ]),
     ]),
-    el('a', { class: 'tile', href: '#/rezervace' }, [
-      el('span', { class: 'tile-icon gold' }, [ico('clock')]),
-      el('span', { class: 'tile-body' }, [
-        el('span', { class: 'tile-title', text: 'Rezervace' }),
-        el('span', { class: 'tile-sub', text: 'Rezervujte si čas' }),
-      ]),
-    ]),
+    heroArt(terminy),
   ]);
 
-  root.append(welcome, tiles, benefitsTitle, benefitsGrid);
+  // rychlé akce — bento jako na webu (podle role přibývají pracovní dlaždice)
+  const cell = (cls, href, icon, title, text, tag) => el('a', { class: 'cell act ' + cls, href }, [
+    el('span', { class: 'ic' }, [ico(icon, 19)]),
+    tag ? el('span', { class: 'cell-tag', text: tag }) : null,
+    el('h3', { text: title }),
+    el('p', { text }),
+    el('span', { class: 'go' }, ['Otevřít', ico('arrow', 14)]),
+  ]);
+  const cells = [
+    cell('s4 hl', '#/karta', 'qr', 'QR karta', 'Ukaž ji dozoru u vstupu. Funguje i offline.'),
+    cell('s4', '#/rezervace', 'clock', 'Rezervace', 'Vyber si volný slot na matraci.'),
+    cell('s4', '#/platba', 'card', 'Vstupy a členství', 'Jednorázový vstup nebo roční členství.'),
+  ];
+  if (isDozor()) cells.push(cell('s4 work', '#/dozor', 'qr', 'Dozor — kontrola', 'Provozní den, kontrola QR a výbavy.', 'Dozor'));
+  if (isStaff()) cells.push(cell('s4 work', '#/admin', 'dashboard', 'Správa členů', 'Přehled členů, souhlasů a plateb.', 'Výbor'));
+  if (isSuperAdmin()) cells.push(cell('s4 owner', '#/zakladna', 'users', 'Členská základna', 'Statistiky členů a účty dozoru.', 'Vlastník'));
+  cells.push(cell('s4', '#/profil', 'user', 'Můj profil', 'Údaje, fotka a dokumenty.'));
+  const doplnky = [
+    cell('s4', '#/pravidla', 'shield', 'Pravidla provozu', 'Výbava, rotace a bezpečnost.'),
+    cell('s4', '#/notifikace', 'bell', 'Notifikace', 'Schválení členství a zprávy od spolku.'),
+  ];
+  while (cells.length % 3 && doplnky.length) cells.push(doplnky.shift());
+  const akce = el('section', { class: 'sec' }, [
+    secHead('zap', 'Rychlé akce', 'Co chceš', 'udělat', null),
+    el('div', { class: 'bento' }, cells),
+  ]);
+
+  root.append(hero, marquee(), akce, sekceTerminy(terminy), sekceVyhody);
 }
 
 /* ---------- PRAVIDLA PROVOZU (základní pravidla) ---------- */

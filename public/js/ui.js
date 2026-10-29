@@ -6,6 +6,11 @@ const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 
 /* ---------- inline SVG ikony (Lucide-style, stroke) ---------- */
 const ICONS = {
+  pin: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+  bike: '<circle cx="18.5" cy="17.5" r="3.5"/><circle cx="5.5" cy="17.5" r="3.5"/><circle cx="15" cy="5" r="1"/><path d="M12 17.5V14l-3-3 4-3 2 3h2"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h10"/>',
   home: '<path d="M3 9.5 12 3l9 6.5V20a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
@@ -324,8 +329,8 @@ function renderIdentityBar() {
 function setThemeColor(role) {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (!meta) return;
-  const base = { member: '#070B14', dozor: '#04140F', vybor: '#0B0714' };
-  meta.setAttribute('content', role === 'superadmin' ? '#3B0416' : (base[role] || base.member));
+  const base = { member: '#06080F', dozor: '#06080F', vybor: '#06080F' };
+  meta.setAttribute('content', role === 'superadmin' ? '#4A0619' : (base[role] || base.member));
 }
 
 /* ---------- FOTKA: zmenšení v prohlížeči (registrace i profil) ---------- */

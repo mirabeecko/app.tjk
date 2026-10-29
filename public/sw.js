@@ -1,28 +1,27 @@
 // sw.js — Service Worker: app shell cache + offline režim pro členskou kartu a provozní řád.
 'use strict';
 
-const CACHE = 'airbag-v54';
+const CACHE = 'airbag-v55';
 const SHELL = [
   '/',
   '/index.html',
-  '/css/fonts.css?v=54',
-  '/css/app.css?v=54',
-  '/css/fonts-airbag.css?v=54',
-  '/css/theme-2026.css?v=54',
-  '/js/api.js?v=54',
-  '/js/ui.js?v=54',
-  '/js/czech.js?v=54',
-  '/js/md.js?v=54',
-  '/js/views-public.js?v=54',
-  '/js/views-member.js?v=54',
+  '/css/app.css?v=55',
+  '/css/fonts-airbag.css?v=55',
+  '/css/theme-komarka.css?v=55',
+  '/img/znak-96.png',
+  '/img/airbag-matrace.webp',
+  '/js/api.js?v=55',
+  '/js/ui.js?v=55',
+  '/js/czech.js?v=55',
+  '/js/md.js?v=55',
+  '/js/views-public.js?v=55',
+  '/js/views-member.js?v=55',
   // views-admin.js / views-dozor.js se načítají LENIVĚ (viz načtiSkript v app.js)
   // → do pre-cache nepatří, jinak by každý stahoval kód, který nepoužije.
-  '/js/app.js?v=54',
+  '/js/app.js?v=55',
   // fonty jsou vlastní (žádná cizí doména) — bez nich by offline režim ztratil písmo
-  '/fonts/inter-latin.woff2',
   '/fonts/archivo-var-latin.woff2',
   '/fonts/spacegrotesk-var-latin.woff2',
-  '/fonts/outfit-latin.woff2',
   '/manifest.json',
   '/favicon.ico',
   '/favicon-16.png',

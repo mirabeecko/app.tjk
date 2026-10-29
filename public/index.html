@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Tělovýchovná jednota Krupka — Členská aplikace</title>
   <meta name="description" content="Členská aplikace Tělovýchovná jednota Krupka: členství TJK i jednorázové vstupy na airbag, registrace, souhlasy, QR karta." />
-  <meta name="theme-color" content="#0B3F3C" />
-  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#06080F" />
+  <meta name="color-scheme" content="dark" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -17,14 +17,13 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <!-- FONTY (design 2026): Archivo nadpisy + Inter text, obojí lokálně v /fonts
+  <!-- FONTY (design Komárka): Archivo nadpisy + Space Grotesk text, lokálně v /fonts
        (Google Fonts jsou v CSP zakázané, font-src 'self'). Preload jen těch dvou. -->
   <link rel="preload" href="/fonts/archivo-var-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/css/fonts.css?v=54" />
-  <link rel="stylesheet" href="/css/fonts-airbag.css?v=54" />
-  <link rel="stylesheet" href="/css/app.css?v=54" />
-  <link rel="stylesheet" href="/css/theme-2026.css?v=54" />
+  <link rel="preload" href="/fonts/spacegrotesk-var-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/fonts-airbag.css?v=55" />
+  <link rel="stylesheet" href="/css/app.css?v=55" />
+  <link rel="stylesheet" href="/css/theme-komarka.css?v=55" />
 </head>
 <body>
   <!-- TRVALE VIDITELNÝ PRUH PŘIHLÁŠENÉHO PROFILU
@@ -32,72 +31,65 @@
        profilů je vždy a na každé obrazovce vidět CELÉ jméno + role + e-mail.
        Naplňuje ho renderIdentityBar() v js/ui.js. -->
   <div id="idbar" class="idbar" role="status" aria-live="polite" hidden></div>
+  <div id="prog" aria-hidden="true"></div>
   <div id="app">
-    <!-- DESKTOP RAIL: značka + vertikální navigace -->
-    <aside class="rail">
-      <a href="#/" class="brand rail-brand">
-        <img src="/img/tjk-logo.png" alt="TJ Krupka" class="brand-logo" />
-        <span class="brand-text">
-          <strong>TJ Krupka</strong>
-          <small>členská aplikace</small>
-        </span>
-      </a>
-      <nav class="topnav rail-nav" id="topnav" aria-label="Hlavní navigace"></nav>
-      <div class="rail-note">
-        <span class="rail-dot" aria-hidden="true"></span>
-        <span>Zařízení: dopadová matrace (airbag)</span>
-      </div>
-    </aside>
-
-    <!-- HLAVNÍ SLOUPEC -->
-    <div class="main-col">
-      <header class="topbar">
-        <button id="menu-btn" class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
-          <span></span><span></span><span></span>
-        </button>
-        <a href="#/" class="brand top-brand">
-          <img src="/img/tjk-logo.png" alt="TJ Krupka" class="brand-logo" />
+    <!-- HLAVIČKA (design Komárka 2026): značka + vodorovné menu + profil/CTA.
+         Na mobilu jen značka + avatar; menu je ve spodní liště a panelu „Více". -->
+    <header class="top">
+      <div class="top-in">
+        <a href="#/" class="brand">
+          <img src="/img/znak-96.png" alt="" class="brand-logo" width="36" height="36" />
           <span class="brand-text">
-            <span class="brand-line">
-              <strong>TJ KRUPKA</strong>
-              <span class="role-pill" id="topbar-role" hidden></span>
-            </span>
-            <small id="topbar-sub">členská aplikace</small>
+            <strong>TJ Krupka</strong>
+            <small>Členská aplikace · Airbag Komárka</small>
           </span>
         </a>
-        <div class="topbar-right">
+        <nav class="nav" id="topnav" aria-label="Hlavní navigace"></nav>
+        <div class="top-right">
+          <span class="role-pill" id="topbar-role" hidden></span>
+          <span class="screen-name" id="topbar-sub" hidden>členská aplikace</span>
+          <div class="top-acts" id="top-acts"></div>
           <a href="#/profil" class="topbar-avatar" id="topbar-avatar" aria-label="Můj profil" hidden></a>
-          <button id="more-btn" class="more-btn" aria-label="Více" aria-expanded="false" aria-controls="mobile-menu">
-            <span></span><span></span><span></span>
-          </button>
         </div>
-        <nav id="mobile-menu" class="mobile-menu" hidden></nav>
-      </header>
+      </div>
+      <button id="menu-btn" class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu" hidden></button>
+      <button id="more-btn" class="more-btn" aria-label="Více" aria-expanded="false" aria-controls="mobile-menu" hidden></button>
+      <nav id="mobile-menu" class="mobile-menu" hidden></nav>
+    </header>
 
-      <main id="view" class="view" role="main"></main>
-    </div>
+    <main id="view" class="view" role="main"></main>
 
     <footer class="app-footer">
-      <nav class="footer-nav">
-        <a href="#/pravidla">Pravidla provozu</a>
-        <a href="#/podminky">Provozní řád</a>
-      </nav>
-      <span>Tělovýchovná jednota Krupka, z.s. · Krupka · <span class="app-verze" title="Verze aplikace (pro ověření, že se načetla nová verze)">v54</span></span>
+      <div class="foot-in">
+        <div class="foot-brand">
+          <img src="/img/znak-96.png" alt="" width="28" height="28" />
+          <div>
+            <strong>Tělovýchovná jednota Krupka, z.s.</strong>
+            <span>Areál Komárka · Horní Krupka</span>
+          </div>
+        </div>
+        <nav class="footer-nav">
+          <a href="#/pravidla">Pravidla provozu</a>
+          <a href="#/podminky">Provozní řád</a>
+          <a href="https://airbag-komarka-web.vercel.app/" rel="noopener">Web Airbag Komárka</a>
+        </nav>
+        <span class="foot-ver">verze <span class="app-verze" title="Verze aplikace (pro ověření, že se načetla nová verze)">v55</span></span>
+      </div>
     </footer>
   </div>
 
   <nav class="bottomnav" id="bottomnav" hidden></nav>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="/js/api.js?v=54"></script>
-  <script src="/js/ui.js?v=54"></script>
-  <script src="/js/czech.js?v=54"></script>
-  <script src="/js/md.js?v=54"></script>
-  <script src="/js/views-public.js?v=54"></script>
-  <script src="/js/views-member.js?v=54"></script>
+  <script src="/js/api.js?v=55"></script>
+  <script src="/js/ui.js?v=55"></script>
+  <script src="/js/czech.js?v=55"></script>
+  <script src="/js/md.js?v=55"></script>
+  <script src="/js/views-public.js?v=55"></script>
+  <script src="/js/views-member.js?v=55"></script>
   <!-- views-admin.js (16 kB) a views-dozor.js se načítají LENIVĚ až když je
        účet opravdu potřebuje (správa / dozor / vlastník). Běžný návštěvník
        tak nestahuje kód, který nikdy nepoužije — viz načtiSkript() v app.js. -->
-  <script src="/js/app.js?v=54"></script>
+  <script src="/js/app.js?v=55"></script>
 </body>
 </html>

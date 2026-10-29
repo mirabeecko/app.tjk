@@ -731,11 +731,31 @@ async function viewBookings() {
     }
   };
 
-  dateInput.addEventListener('change', load);
+  // pás dnů (design Komárka): 14 dní dopředu jedním klepnutím, datum výš zůstává pro vzdálené termíny
+  const DNY_K = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
+  const dayStrip = el('div', { class: 'day-strip', role: 'tablist', 'aria-label': 'Výběr dne' });
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const markDay = () => dayStrip.querySelectorAll('.day').forEach((b) => b.classList.toggle('on', b.dataset.date === dateInput.value));
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+    const b = el('button', { type: 'button', class: 'day', dataset: { date: iso(d) } }, [
+      el('span', { class: 'dw', text: i === 0 ? 'Dnes' : DNY_K[d.getDay()] }),
+      el('span', { class: 'dn', text: String(d.getDate()) }),
+      el('span', { class: 'dm', text: `${d.getMonth() + 1}.` }),
+    ]);
+    b.addEventListener('click', () => { dateInput.value = b.dataset.date; markDay(); load(); });
+    dayStrip.append(b);
+  }
+  dateInput.value = iso(today);
+  markDay();
+  dateInput.addEventListener('change', () => { markDay(); load(); });
   facilitySel.addEventListener('change', load);
-  root.append(el('div', { class: 'card' }, [
-    el('label', { text: 'Zařízení' }), facilitySel,
-    el('label', { text: 'Datum' }), dateInput,
+  root.append(el('div', { class: 'card booking-card' }, [
+    el('div', { class: 'bk-row' }, [
+      el('div', { class: 'field' }, [el('label', { text: 'Zařízení' }), facilitySel]),
+      el('div', { class: 'field' }, [el('label', { text: 'Jiné datum' }), dateInput]),
+    ]),
+    dayStrip,
     el('p', { class: 'muted small', text: 'Sloty po 60 minutách. Na zařízení je vždy jen jedna osoba.' }),
     slotsBox,
   ]), myBookings);

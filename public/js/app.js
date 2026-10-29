@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=54';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=54';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=55';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=55';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -24,37 +24,37 @@ function nactiSkript(src) {
 
 const routes = [
   { pattern: /^#\/?$/, view: viewLanding, name: 'Úvod', icon: 'home' },
-  { pattern: /^#\/registrace$/, view: viewRegister, name: 'Registrace', icon: 'edit' },
-  { pattern: /^#\/prihlaseni$/, view: viewLogin, name: 'Přihlášení', icon: 'key' },
+  { pattern: /^#\/registrace$/, view: viewRegister, name: 'Registrace', icon: 'edit', kicker: 'Nový účet' },
+  { pattern: /^#\/prihlaseni$/, view: viewLogin, name: 'Přihlášení', icon: 'key', kicker: 'Účet' },
   { pattern: /^#\/prihlaseni\/(.+)$/, view: (m) => viewLoginToken(m[1]) },
-  { pattern: /^#\/souhlasy$/, view: viewConsent, name: 'Souhlasy', icon: 'shield' },
+  { pattern: /^#\/souhlasy$/, view: viewConsent, name: 'Souhlasy', icon: 'shield', kicker: 'Registrace · krok 2' },
   { pattern: /^#\/souhlas-rodice\/(.+)$/, view: (m) => viewGuardian(m[1]) },
-  { pattern: /^#\/platba$/, view: viewPayment, name: 'Platba', icon: 'card' },
+  { pattern: /^#\/platba$/, view: viewPayment, name: 'Platba', icon: 'card', kicker: 'Vstup a členství' },
   { pattern: /^#\/platba\/(.+)$/, view: (m) => viewGateway(m[1]) },
   { pattern: /^#\/potvrzeni\/(.+)$/, view: (m) => viewReceipt(m[1]) },
-  { pattern: /^#\/karta$/, view: viewCard, name: 'Členská karta', icon: 'ticket' },
+  { pattern: /^#\/karta$/, view: viewCard, name: 'Členská karta', icon: 'ticket', kicker: 'Vstup na matraci' },
   // Akce spolku jsou momentálně SKRYTÉ z UI (backend a testy připravené) —
   // route se vrátí jedním řádkem: { pattern: /^#\/akce$/, view: viewEvents, name: 'Akce', icon: 'calendar' },
-  { pattern: /^#\/pravidla$/, view: viewRules, name: 'Pravidla provozu', icon: 'shield' },
-  { pattern: /^#\/profil$/, view: viewProfile, name: 'Profil', icon: 'user' },
-  { pattern: /^#\/notifikace$/, view: viewNotifications, name: 'Notifikace', icon: 'bell' },
+  { pattern: /^#\/pravidla$/, view: viewRules, name: 'Pravidla provozu', icon: 'shield', kicker: 'Bezpečnost' },
+  { pattern: /^#\/profil$/, view: viewProfile, name: 'Profil', icon: 'user', kicker: 'Můj účet' },
+  { pattern: /^#\/notifikace$/, view: viewNotifications, name: 'Notifikace', icon: 'bell', kicker: 'Můj účet' },
   // ---- SPRÁVA (kód se dotahuje lenivě) ----
-  { pattern: /^#\/admin$/, view: () => viewAdmin(), lazy: SKRIPT_ADMIN, name: 'Správa', icon: 'dashboard' },
+  { pattern: /^#\/admin$/, view: () => viewAdmin(), lazy: SKRIPT_ADMIN, name: 'Správa', icon: 'dashboard', kicker: 'Správa spolku' },
   { pattern: /^#\/admin\/(.+)$/, view: (m) => viewAdminDetail(m[1]), lazy: SKRIPT_ADMIN },
-  { pattern: /^#\/superadmin$/, view: () => viewSuperAdmin(), lazy: SKRIPT_ADMIN, name: 'Vlastník', icon: 'shield' },
-  { pattern: /^#\/katalog-admin$/, view: () => viewAdminCatalog(), lazy: SKRIPT_ADMIN, name: 'Katalog (admin)', icon: 'bag' },
-  { pattern: /^#\/outbox$/, view: () => viewOutbox(), name: 'E-maily', icon: 'mail' },
+  { pattern: /^#\/superadmin$/, view: () => viewSuperAdmin(), lazy: SKRIPT_ADMIN, name: 'Vlastník', icon: 'shield', kicker: 'Vlastník' },
+  { pattern: /^#\/katalog-admin$/, view: () => viewAdminCatalog(), lazy: SKRIPT_ADMIN, name: 'Katalog (admin)', icon: 'bag', kicker: 'Vlastník' },
+  { pattern: /^#\/outbox$/, view: () => viewOutbox(), name: 'E-maily', icon: 'mail', kicker: 'Vývoj' },
   // ---- DOZOR (role dozor / výbor / superadmin) ----
-  { pattern: /^#\/dozor$/, view: () => viewDozor(), lazy: SKRIPT_DOZOR, name: 'Dozor', icon: 'qr', dozor: true },
+  { pattern: /^#\/dozor$/, view: () => viewDozor(), lazy: SKRIPT_DOZOR, name: 'Dozor', icon: 'qr', kicker: 'Dozor na místě', dozor: true },
   { pattern: /^#\/dozor-pozvanka\/(.+)$/, view: (m) => viewDozorPozvanka(m[1]), lazy: SKRIPT_DOZOR },
   // ---- VLASTNÍK: přehled základny + správa dozoru (pouze miroslavbrozek@gmail.com) ----
-  { pattern: /^#\/zakladna$/, view: () => viewSuperAdminZakladna(), lazy: SKRIPT_DOZOR, name: 'Členská základna', icon: 'users', owner: true },
-  { pattern: /^#\/superadmin-dozor$/, view: () => viewSuperAdminDozor(), lazy: SKRIPT_DOZOR, name: 'Správa dozoru', icon: 'qr', owner: true },
-  { pattern: /^#\/podminky$/, view: viewDocs, name: 'Podmínky', icon: 'file' },
+  { pattern: /^#\/zakladna$/, view: () => viewSuperAdminZakladna(), lazy: SKRIPT_DOZOR, name: 'Členská základna', icon: 'users', kicker: 'Vlastník', owner: true },
+  { pattern: /^#\/superadmin-dozor$/, view: () => viewSuperAdminDozor(), lazy: SKRIPT_DOZOR, name: 'Správa dozoru', icon: 'qr', kicker: 'Vlastník', owner: true },
+  { pattern: /^#\/podminky$/, view: viewDocs, name: 'Podmínky', icon: 'file', kicker: 'Dokumenty' },
   // POZOR: viewBookings žije ve views-admin.js — MUSÍ být obalené v lazy šipce,
   // jinak by se na něj router odkazoval v okamžiku sestavení a spadl by celý
   // start aplikace (ReferenceError). Rezervace proto dotahuje admin skript.
-  { pattern: /^#\/rezervace$/, view: () => viewBookings(), lazy: SKRIPT_ADMIN, name: 'Rezervace', icon: 'clock' },
+  { pattern: /^#\/rezervace$/, view: () => viewBookings(), lazy: SKRIPT_ADMIN, name: 'Rezervace', icon: 'clock', kicker: 'Termíny' },
   // Merch je momentálně SKRYTÝ — žádný merch ještě neexistuje, takže se
   // v aplikaci nesmí zobrazovat žádné produkty. Route se vrací jedním řádkem:
   // { pattern: /^#\/merch$/, view: viewMerch, name: 'Merch', icon: 'bag' },
@@ -69,6 +69,10 @@ async function render() {
   if (!me) await refreshMe().catch(() => {});
 
   const match = hash.match(route.pattern);
+  _routeNow = route;
+  { const v = $('#view'); if (v) v.className = 'view'; }
+  document.body.dataset.screen = (route.name || 'jine').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  closeMenu();
   try {
     // kód správy/dozoru se dotáhne, až když je potřeba
     if (route.lazy) await nactiSkript(route.lazy);
@@ -85,6 +89,8 @@ async function render() {
   }
   renderNav();
   renderTopbar(route.name);
+  decoratePage();
+  window.scrollTo(0, 0);
   refreshNotifBadge().catch(() => {});
 }
 let notifUnread = 0;
@@ -105,175 +111,226 @@ function renderNav() {
   const topnav = $('#topnav');
   const bottomnav = $('#bottomnav');
   const mobileMenu = $('#mobile-menu');
+  const topActs = $('#top-acts');
   topnav.innerHTML = '';
   bottomnav.innerHTML = '';
   if (mobileMenu) mobileMenu.innerHTML = '';
-  // Vzhled podle role: účet dozoru má odlišné barvy (na první pohled poznat)
+  if (topActs) topActs.innerHTML = '';
+  // Vzhled podle role: účet dozoru / výboru / superadmina má odlišné barvy
   applyRoleTheme();
   // Trvale viditelný pruh s CELÝM jménem a rolí přihlášeného profilu.
-  // Volá se při každém překreslení (tj. na každé obrazovce i po přihlášení).
   renderIdentityBar();
 
-  // Aktivní položka: „Domů" (#/) se musí rozsvítit taky — dřív se vynechávalo
+  // Aktivní položka: „Přehled" (#/) se musí rozsvítit taky
   const isActive = (href) => (href === '#/' ? (hash === '#/' || hash === '') : hash.startsWith(href));
+  const logged = isLoggedIn();
 
-  // hlavní položky (viditelné v top navu na desktopu)
+  // ---- skupiny položek (design Komárka 2026) ----
   const mainItems = [
-    { href: '#/', label: 'Úvod', icon: 'home' },
+    { href: '#/', label: 'Přehled', icon: 'home' },
     { href: '#/rezervace', label: 'Rezervace', icon: 'clock' },
+  ].concat(logged ? [{ href: '#/karta', label: 'Karta', icon: 'ticket' }] : [])
+    .concat([
+      { href: '#/pravidla', label: 'Pravidla', icon: 'shield' },
+      { href: '#/podminky', label: 'Provozní řád', icon: 'file' },
+    ]);
+  // práce na place a správa — v hlavičce jako rozbalovací „Správa"
+  const workItems = [];
+  if (logged && isDozor()) workItems.push({ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' });
+  if (logged && isStaff()) workItems.push({ href: '#/admin', label: 'Správa členů', icon: 'dashboard' });
+  const ownerItems = (logged && isSuperAdmin()) ? [
+    { href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' },
+    { href: '#/superadmin-dozor', label: 'Správa dozoru', icon: 'qr', highlight: 'owner' },
+    { href: '#/superadmin', label: 'Vlastník', icon: 'shield', highlight: 'owner' },
+    { href: '#/katalog-admin', label: 'Katalog', icon: 'bag', highlight: 'owner' },
+  ] : [];
+  const accountItems = logged ? [
+    { href: '#/profil', label: 'Můj profil', icon: 'user' },
+    { href: '#/notifikace', label: 'Notifikace', icon: 'bell' },
+    { href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' },
+  ] : [
+    { href: '#/prihlaseni', label: 'Přihlásit se', icon: 'key' },
+    { href: '#/registrace', label: 'Registrace', icon: 'edit' },
   ];
 
-  // sekundární položky (do „více" menu / sekcí)
-  const moreItems = [];
-  // ZVÝRAZNĚNÁ položka pro účet s právy dozoru — musí být na první pohled vidět
-  if (isLoggedIn() && isDozor()) {
-    moreItems.push({ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' });
+  // ---- HLAVIČKA (desktop): vodorovné „pilulky" + rozbalovací Správa ----
+  for (const it of mainItems) {
+    topnav.append(el('a', { class: 'nav-a' + (isActive(it.href) ? ' on' : ''), href: it.href, text: it.label }));
   }
-  moreItems.push(
-    { href: '#/karta', label: 'Členská karta', icon: 'ticket' },
-    { href: '#/pravidla', label: 'Pravidla provozu', icon: 'shield' },
-    { href: '#/podminky', label: 'Provozní řád', icon: 'file' },
-  );
-  if (isLoggedIn() && isStaff()) moreItems.push({ href: '#/admin', label: 'Správa', icon: 'dashboard' });
-  // Vlastník: okamžitý přehled členské základny + správa účtů dozoru
-  if (isLoggedIn() && isSuperAdmin()) {
-    moreItems.push({ href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' });
-    moreItems.push({ href: '#/superadmin-dozor', label: 'Správa dozoru', icon: 'qr', highlight: 'owner' });
+  if (workItems.length || ownerItems.length) {
+    const all = workItems.concat(ownerItems);
+    const drop = el('details', { class: 'nav-drop' + (all.some((i) => isActive(i.href)) ? ' on' : '') });
+    const panel = el('div', { class: 'drop-panel' });
+    const addGroup = (title, items) => {
+      if (!items.length) return;
+      panel.append(el('div', { class: 'drop-title', text: title }));
+      for (const it of items) {
+        panel.append(el('a', {
+          class: 'drop-item' + (isActive(it.href) ? ' on' : '') + (it.highlight ? ` hl-${it.highlight}` : ''),
+          href: it.href,
+        }, [el('span', { class: 'drop-ico' }, [ico(it.icon, 16)]), el('span', { text: it.label })]));
+      }
+    };
+    addGroup('Provoz', workItems);
+    addGroup('Vlastník', ownerItems);
+    drop.append(el('summary', { class: 'nav-a' }, [
+      el('span', { text: isSuperAdmin() ? 'Vlastník' : 'Správa' }), ico('chevron', 14),
+    ]), panel);
+    topnav.append(drop);
   }
-  if (isLoggedIn() && isSuperAdmin()) moreItems.push({ href: '#/superadmin', label: 'Vlastník', icon: 'shield' });
-  if (isLoggedIn() && isSuperAdmin()) moreItems.push({ href: '#/katalog-admin', label: 'Katalog (admin)', icon: 'bag' });
-  // Notifikace (schválení/neschválení členství) — badge s počtem nepřečtených
-  if (isLoggedIn()) moreItems.push({ href: '#/notifikace', label: 'Notifikace', icon: 'bell', badge: true });
-  // Dev inbox (outbox) je chráněn přihlášením — nabídka jen pro přihlášené
-  if (isLoggedIn()) moreItems.push({ href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' });
 
-  // boční panel (desktop, design 2026): CELÁ navigace po sekcích + karta profilu dole.
-  // Dřív tu byly jen 2 položky a zbytek (správa, vlastník…) byl schovaný v menu „více".
-  const railSections = [
-    { title: 'Hlavní', items: mainItems.concat(isLoggedIn() ? [{ href: '#/karta', label: 'Členská karta', icon: 'ticket' }] : []) },
-    { title: 'Informace', items: [{ href: '#/pravidla', label: 'Pravidla provozu', icon: 'shield' }, { href: '#/podminky', label: 'Provozní řád', icon: 'file' }] },
-  ];
-  if (isLoggedIn()) {
-    const work = []
-      .concat(isDozor() ? [{ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' }] : [])
-      .concat(isStaff() ? [{ href: '#/admin', label: 'Správa členů', icon: 'dashboard' }] : []);
-    if (work.length) railSections.push({ title: 'Provoz', items: work });
-    if (isSuperAdmin()) {
-      railSections.push({ title: 'Vlastník', items: [
-        { href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' },
-        { href: '#/superadmin-dozor', label: 'Správa dozoru', icon: 'qr', highlight: 'owner' },
-        { href: '#/superadmin', label: 'Vlastník', icon: 'shield', highlight: 'owner' },
-        { href: '#/katalog-admin', label: 'Katalog', icon: 'bag', highlight: 'owner' },
-      ] });
+  // ---- pravá strana hlavičky: notifikace + hlavní akce ----
+  if (topActs) {
+    if (logged) {
+      topActs.append(
+        el('a', { class: 'icon-btn', href: '#/notifikace', 'aria-label': 'Notifikace', title: 'Notifikace' }, [
+          ico('bell', 18), el('span', { class: 'notif-badge', style: 'display:none' }),
+        ]),
+        el('a', { class: 'btn primary sm top-cta', href: '#/platba' }, [ico('ticket', 16), el('span', { text: 'Koupit vstup' })]),
+      );
+    } else {
+      topActs.append(
+        el('a', { class: 'btn sm top-ghost', href: '#/prihlaseni' }, [ico('key', 16), el('span', { text: 'Přihlásit' })]),
+        el('a', { class: 'btn primary sm top-cta', href: '#/registrace' }, [ico('edit', 16), el('span', { text: 'Registrace' })]),
+      );
     }
-    railSections.push({ title: 'Účet', items: [
-      { href: '#/notifikace', label: 'Notifikace', icon: 'bell' },
-      { href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' },
-    ] });
   }
-  for (const sec of railSections) {
-    topnav.append(el('div', { class: 'rn-section', text: sec.title }));
-    for (const it of sec.items) {
-      topnav.append(el('a', {
-        class: 'nav-btn' + (isActive(it.href) ? ' active' : '') + (it.highlight ? ` hl-${it.highlight}` : ''),
-        href: it.href,
-      }, [
-        ico(it.icon, 18),
-        el('span', { text: it.label }),
-        it.href === '#/notifikace' ? el('span', { class: 'notif-badge', style: 'display:none' }) : null,
+
+  // ---- panel „Více" (mobil): profil nahoře + všechny sekce ----
+  if (mobileMenu) {
+    if (logged) {
+      mobileMenu.append(el('a', { class: 'mm-profile', href: '#/profil', onclick: () => closeMenu() }, [
+        el('span', { class: 'mm-ava', text: memberFullName(me.member).split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase() }),
+        el('span', { class: 'mm-ptxt' }, [
+          el('strong', { text: memberFullName(me.member) }),
+          el('span', { text: `${roleLabel(me.member.role)} · ${me.member.email || ''}` }),
+        ]),
+        ico('arrow', 16),
       ]));
     }
-  }
-  if (isLoggedIn()) {
-    // karta profilu: CELÉ jméno + role (křestní jméno nestačí)
-    const photo = me.member.photo || me.member.photoUrl || '';
-    const initials = memberFullName(me.member).split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase();
-    const ava = el('span', { class: 'ru-ava' });
-    if (photo) { const img = document.createElement('img'); img.src = photo; img.alt = ''; ava.append(img); } else ava.textContent = initials;
-    topnav.append(el('a', {
-      class: 'rail-user',
-      href: '#/profil',
-      title: `Přihlášený profil: ${memberFullName(me.member)} — ${roleLabel(me.member.role)} (${me.member.email || ''})`,
-    }, [
-      ava,
-      el('span', { class: 'ru-txt' }, [
-        el('span', { class: 'ru-name', text: memberFullName(me.member) }),
-        el('span', { class: 'ru-role', text: roleLabel(me.member.role) }),
-      ]),
-    ]));
-  } else {
-    topnav.append(el('a', { class: 'nav-btn ghost-cta', href: '#/prihlaseni' }, [ico('key', 16), el('span', { text: 'Přihlásit se' })]));
-    topnav.append(el('a', { class: 'nav-btn cta', href: '#/registrace' }, [ico('edit', 16), el('span', { text: 'Registrace' })]));
-  }
-
-  // mobilní / „více" menu (sekce)
-  if (mobileMenu) {
     const sections = [
-      { title: 'Hlavní', items: mainItems.concat([{ href: '#/karta', label: 'Členská karta', icon: 'ticket' }]) },
-      { title: 'Informace', items: [{ href: '#/pravidla', label: 'Pravidla provozu', icon: 'shield' }, { href: '#/podminky', label: 'Provozní řád', icon: 'file' }] },
-      {
-        title: 'Účet',
-        items: isLoggedIn()
-          ? [{ href: '#/profil', label: `Přihlášený profil: ${memberFullName(me.member)} — ${roleLabel(me.member.role)}`, icon: 'user', highlight: me.member.role === 'superadmin' ? 'owner' : (isDozor() ? 'dozor' : null) }]
-              .concat(isDozor() ? [{ href: '#/dozor', label: 'Dozor — kontrola QR', icon: 'qr', highlight: 'dozor' }] : [])
-              .concat(isStaff() ? [{ href: '#/admin', label: 'Správa', icon: 'dashboard' }] : [])
-              .concat(isSuperAdmin() ? [{ href: '#/zakladna', label: 'Členská základna', icon: 'users', highlight: 'owner' }] : [])
-              .concat(isSuperAdmin() ? [{ href: '#/superadmin-dozor', label: 'Správa dozoru', icon: 'qr', highlight: 'owner' }] : [])
-              .concat(isSuperAdmin() ? [{ href: '#/superadmin', label: 'Vlastník', icon: 'shield' }] : [])
-              .concat([{ href: '#/notifikace', label: 'Notifikace', icon: 'bell' }])
-              .concat([{ href: '#/outbox', label: 'E-maily (dev)', icon: 'mail' }])
-          : [{ href: '#/prihlaseni', label: 'Přihlásit se', icon: 'key' }, { href: '#/registrace', label: 'Registrace', icon: 'edit' }],
-      },
+      { title: 'Aplikace', items: mainItems },
+      { title: 'Provoz', items: workItems },
+      { title: 'Vlastník', items: ownerItems },
+      { title: 'Účet', items: accountItems },
     ];
     for (const sec of sections) {
-      const h = el('div', { class: 'mm-section', text: sec.title });
-      mobileMenu.append(h);
+      if (!sec.items.length) continue;
+      mobileMenu.append(el('div', { class: 'mm-section', text: sec.title }));
+      const grid = el('div', { class: 'mm-grid' });
       for (const it of sec.items) {
         const a = el('a', {
           href: it.href,
           class: 'mm-item' + (isActive(it.href) ? ' active' : '') + (it.highlight ? ` hl-${it.highlight}` : ''),
         }, [
           el('span', { class: 'mm-icon' }, [ico(it.icon, 18)]),
-          el('span', { text: it.label }),
+          el('span', { class: 'mm-label', text: it.label }),
           it.href === '#/notifikace' ? el('span', { class: 'notif-badge', style: 'display:none' }) : null,
         ]);
         a.addEventListener('click', () => closeMenu());
-        mobileMenu.append(a);
+        grid.append(a);
       }
+      mobileMenu.append(grid);
     }
   }
 
-  // bottom nav (mobil, design 2026): nejčastější cíle + „Více" (spodní panel se zbytkem)
-  const mobileItems = [
-    { href: '#/', label: 'Domů', icon: 'home' },
-    isLoggedIn()
-      ? { href: '#/karta', label: 'Karta', icon: 'ticket' }
-      : { href: '#/prihlaseni', label: 'Přihlásit', icon: 'key' },
-    { href: '#/rezervace', label: 'Rezervace', icon: 'clock' },
-  ];
-  // Dozor se musí trefit do spodní lišty (je to hlavní pracovní nástroj na place)
-  if (isLoggedIn() && isDozor()) mobileItems.push({ href: '#/dozor', label: 'Dozor', icon: 'qr' });
-  else if (isLoggedIn() && isStaff()) mobileItems.push({ href: '#/admin', label: 'Správa', icon: 'dashboard' });
-  else mobileItems.push({ href: '#/podminky', label: 'Řád', icon: 'file' });
-
-  for (const it of mobileItems) {
-    bottomnav.append(el('a', { href: it.href, class: isActive(it.href) ? 'active' : '' }, [
-      el('span', { class: 'ico' }, [ico(it.icon)]),
-      el('span', { text: it.label }),
-    ]));
-  }
-  const moreTab = el('button', { type: 'button', class: 'bn-more', 'aria-label': 'Další nabídka', 'aria-controls': 'mobile-menu' }, [
+  // ---- SPODNÍ LIŠTA (mobil): 2 + velké tlačítko uprostřed + 2 ----
+  const tab = (it) => el('a', { href: it.href, class: 'tab' + (isActive(it.href) ? ' active' : '') }, [
+    el('span', { class: 'ico' }, [ico(it.icon)]),
+    el('span', { class: 'tab-l', text: it.label }),
+  ]);
+  bottomnav.append(tab({ href: '#/', label: 'Přehled', icon: 'home' }));
+  bottomnav.append(tab({ href: '#/rezervace', label: 'Rezervace', icon: 'clock' }));
+  const fab = logged
+    ? { href: '#/karta', label: 'Karta', icon: 'qr' }
+    : { href: '#/registrace', label: 'Registrace', icon: 'edit' };
+  bottomnav.append(el('a', { href: fab.href, class: 'tab tab-fab' + (isActive(fab.href) ? ' active' : '') }, [
+    el('span', { class: 'fab' }, [ico(fab.icon, 24)]),
+    el('span', { class: 'tab-l', text: fab.label }),
+  ]));
+  if (logged && isDozor()) bottomnav.append(tab({ href: '#/dozor', label: 'Dozor', icon: 'qr' }));
+  else if (logged && isStaff()) bottomnav.append(tab({ href: '#/admin', label: 'Správa', icon: 'dashboard' }));
+  else if (logged) bottomnav.append(tab({ href: '#/profil', label: 'Profil', icon: 'user' }));
+  else bottomnav.append(tab({ href: '#/prihlaseni', label: 'Přihlásit', icon: 'key' }));
+  const moreTab = el('button', { type: 'button', class: 'tab bn-more', 'aria-label': 'Další nabídka', 'aria-controls': 'mobile-menu' }, [
     el('span', { class: 'ico' }, [ico('menu')]),
-    el('span', { text: 'Více' }),
+    el('span', { class: 'tab-l', text: 'Více' }),
   ]);
   moreTab.addEventListener('click', (ev) => {
     ev.stopPropagation();           // jinak by ho hned zavřel posluchač „klik mimo menu"
     const more = $('#more-btn');
     if (more) more.click();
+    moreTab.classList.toggle('active', $('#mobile-menu').classList.contains('open'));
   });
   bottomnav.append(moreTab);
   bottomnav.hidden = false;
 }
+
+/* ---------- HLAVIČKY STRÁNEK (design Komárka) ----------
+   Každý pohled začíná prostým <h1>. Tady z něj uděláme hlavičku ve stylu webu
+   Airbag Komárka: malý „kicker" s ikonou + velký nadpis s posledním slovem
+   ve značkové barvě + podtitulek. Běží přes MutationObserver, takže funguje
+   i u pohledů, které se překreslují samy (bez routeru). */
+let _routeNow = null;
+function decoratePage() {
+  const root = $('#view');
+  if (!root) return;
+  const h1 = root.querySelector(':scope > h1');
+  if (!h1 || h1.dataset.dec) return;
+  h1.dataset.dec = '1';
+  const r = _routeNow || {};
+  const head = el('div', { class: 'page-head' });
+  head.append(el('span', { class: 'kicker' }, [ico(r.icon || 'home', 14), el('span', { text: r.kicker || 'Členská aplikace' })]));
+  // poslední slovo nadpisu do <em> (barva role / limetka)
+  const textNodes = [...h1.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
+  const last = textNodes[textNodes.length - 1];
+  if (last) {
+    const s = last.textContent.replace(/\s+$/, '');
+    const i = s.lastIndexOf(' ');
+    if (i > 0) {
+      const em = document.createElement('em');
+      em.textContent = s.slice(i + 1);
+      last.textContent = s.slice(0, i + 1);
+      last.after(em);
+    } else if (textNodes.length === 1 && !h1.querySelector('*')) {
+      h1.innerHTML = '';
+      const em = document.createElement('em');
+      em.textContent = s;
+      h1.append(em);
+    }
+  }
+  h1.before(head);
+  head.append(h1);
+  const next = head.nextElementSibling;
+  if (next && next.tagName === 'P' && (next.classList.contains('muted') || next.classList.contains('lead'))) {
+    next.classList.add('sub');
+    head.append(next);
+  }
+}
+(function watchView() {
+  const start = () => {
+    const root = $('#view');
+    if (!root) return;
+    let raf = 0;
+    new MutationObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; decoratePage(); });
+    }).observe(root, { childList: true });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+  // tenká barevná linka nahoře = průběh scrollu (jako na webu)
+  window.addEventListener('scroll', () => {
+    const pr = $('#prog');
+    if (!pr) return;
+    const h = document.documentElement.scrollHeight - innerHeight;
+    pr.style.width = (h > 0 ? Math.min(100, (scrollY / h) * 100) : 0) + '%';
+  }, { passive: true });
+  // rozbalovací „Správa" v hlavičce: zavřít klikem mimo
+  document.addEventListener('click', (ev) => {
+    document.querySelectorAll('.nav-drop[open]').forEach((d) => { if (!d.contains(ev.target)) d.removeAttribute('open'); });
+  });
+})();
 
 /* ---------- hamburger / „více" menu ---------- */
 function closeMenu() {
