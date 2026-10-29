@@ -459,6 +459,7 @@ details.doc-details {
   text-align: center;
 }
 .app-footer a { color: var(--text-1); }
+.app-verze { color: rgba(203, 242, 45, 0.55); font-size: 0.62rem; }
 .footer-nav { display: flex; justify-content: center; gap: 14px; margin-bottom: 6px; }
 
 /* ---------- 15. MENU (mobil) ---------- */

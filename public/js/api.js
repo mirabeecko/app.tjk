@@ -99,8 +99,25 @@ function isSuperAdmin() {
 
 // Registrace service workeru (PWA offline). Přesunuto z inline <script>
 // kvůli striktnímu CSP (script-src 'self').
+// PROČ tady je víc než jen register(): v telefonech zůstávala STARÁ verze
+// aplikace (starý HTML shell + CSS ze SW cache), takže uživatel po nasazení
+// „nevidí žádnou změnu“, i když server servíruje novou verzi. Proto:
+//  • updateViaCache: 'none' — prohlížeč nesmí sw.js brát z HTTP cache,
+//  • reg.update() při každém načtení — hned se zkontroluje nová verze,
+//  • controllerchange → jedno obnovení stránky, ale jen když už nějaký SW
+//    existoval (první návštěva se nerefreshuje, aby nevznikl reload loop).
 if ('serviceWorker' in navigator) {
+  const melKontrolora = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!melKontrolora) return;
+    if (sessionStorage.getItem('tjk-sw-reload') === '1') return;
+    sessionStorage.setItem('tjk-sw-reload', '1');
+    location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('SW registrace selhala:', e));
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      .then((reg) => reg.update().catch(() => {}))
+      .catch((e) => console.warn('SW registrace selhala:', e));
   });
 }
+
