@@ -13,6 +13,18 @@ const D = require('./db');
 // Prefix schématu: postgres má tabulky v `app.`, sqlite v hlavním schématu.
 const TBL = (n) => (D.driver === 'postgres' ? `app.${n}` : n);
 
+// Datum jako TEXT 'YYYY-MM-DD' — POZOR: sloupce nejsou stejného typu!
+//  • app.entries.created_at, app.membership_audit.created_at = TEXT → substr() stačí
+//    v SQLite i Postgresu.
+//  • app.instructions.instructed_at = timestamptz → substr(timestamptz,…) v Postgresu
+//    NEEXISTUJE (chyba 42883 → HTTP 500 na /api/dozor/provozni-den). Tam se převádí
+//    na text přes to_char v pražské zóně, aby den seděl i po půlnoci.
+const DAY_TEXT = (col) => `substr(${col}, 1, 10)`;
+const DAY_TS = (col) =>
+  D.driver === 'postgres'
+    ? `to_char(${col} AT TIME ZONE 'Europe/Prague', 'YYYY-MM-DD')`
+    : `substr(${col}, 1, 10)`;
+
 const uuid = () => D.uuid();
 const now = () => D.now();
 
@@ -148,9 +160,9 @@ const Entries = {
   // Den s největším provozem + rozložení po hodinách (pro grafy)
   async byDay(days = 30) {
     return D.raw.all(
-      `SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS c
+      `SELECT ${DAY_TEXT('created_at')} AS day, COUNT(*) AS c
          FROM ${TBL('entries')}
-        GROUP BY substr(created_at, 1, 10)
+        GROUP BY ${DAY_TEXT('created_at')}
         ORDER BY day DESC
         LIMIT ${Number(days) || 30}`
     );
@@ -461,7 +473,7 @@ const Instructions = {
   async listForDay(day, facilityCode = 'airbag') {
     return D.raw.all(
       `SELECT * FROM ${TBL('instructions')}
-        WHERE facility_code = ? AND substr(instructed_at, 1, 10) = ?
+        WHERE facility_code = ? AND ${DAY_TS('instructed_at')} = ?
         ORDER BY instructed_at DESC`,
       [facilityCode, day]
     );
@@ -476,7 +488,7 @@ const Instructions = {
   async count(day, facilityCode = 'airbag') {
     const r = await D.raw.get(
       `SELECT COUNT(*) AS c FROM ${TBL('instructions')}
-        WHERE facility_code = ? AND substr(instructed_at, 1, 10) = ? AND result = 'absolvoval'`,
+        WHERE facility_code = ? AND ${DAY_TS('instructed_at')} = ? AND result = 'absolvoval'`,
       [facilityCode, day]
     );
     return r ? Number(r.c) : 0;
