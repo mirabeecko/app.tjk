@@ -228,6 +228,56 @@ function memberFullName(m) {
 function roleLabel(role) { return ROLE_LABEL[role] || role || 'Člen'; }
 function roleShort(role) { return ROLE_SHORT[role] || 'PROFIL'; }
 
+/* ---------- hlavička designu v3: role, název obrazovky, avatar ----------
+   Volá se z render() v app.js po každém překreslení. Doplňuje tři místa
+   v index.html: #topbar-role (pilulka role), #topbar-sub (název obrazovky)
+   a #topbar-avatar (fotka člena nebo iniciály). Nikdy nic nemaže — když
+   prvek chybí, jen se přeskočí (starý shell musí fungovat dál). */
+function renderTopbar(screenName) {
+  const sub = $('#topbar-sub');
+  const roleEl = $('#topbar-role');
+  const avatar = $('#topbar-avatar');
+  const session = (typeof currentMe === 'function') ? currentMe() : null;
+  const member = session && session.member ? session.member : null;
+
+  if (sub) sub.textContent = (screenName === 'Úvod' ? 'Domů' : screenName) || 'členská aplikace';
+
+  if (roleEl) {
+    if (member) {
+      roleEl.textContent = roleShort(member.role || 'member');
+      roleEl.hidden = false;
+    } else {
+      roleEl.textContent = '';
+      roleEl.hidden = true;
+    }
+  }
+
+  if (avatar) {
+    if (!member) {
+      avatar.hidden = true;
+      avatar.innerHTML = '';
+      return;
+    }
+    const photo = member.photo || member.photoUrl || '';
+    if (photo) {
+      avatar.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = photo;
+      img.alt = memberFullName(member);
+      avatar.append(img);
+    } else {
+      const initials = memberFullName(member)
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0].toUpperCase())
+        .join('');
+      avatar.textContent = initials || 'TJK';
+    }
+    avatar.hidden = false;
+  }
+}
+
 /** Naplní trvale viditelný pruh přihlášeným profilem (nebo ho skryje). */
 function renderIdentityBar() {
   const bar = $('#idbar');

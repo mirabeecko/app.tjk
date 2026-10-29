@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=46';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=46';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=47';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=47';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -84,6 +84,7 @@ async function render() {
     );
   }
   renderNav();
+  renderTopbar(route.name);
   refreshNotifBadge().catch(() => {});
 }
 let notifUnread = 0;
@@ -113,7 +114,8 @@ function renderNav() {
   // Volá se při každém překreslení (tj. na každé obrazovce i po přihlášení).
   renderIdentityBar();
 
-  const isActive = (href) => hash.startsWith(href) && href !== '#/';
+  // Aktivní položka: „Domů" (#/) se musí rozsvítit taky — dřív se vynechávalo
+  const isActive = (href) => (href === '#/' ? (hash === '#/' || hash === '') : hash.startsWith(href));
 
   // hlavní položky (viditelné v top navu na desktopu)
   const mainItems = [
@@ -202,21 +204,17 @@ function renderNav() {
     }
   }
 
-  // bottom nav (mobile)
+  // bottom nav (mobile) — design v3: čtyři položky jako v mockupu
   const mobileItems = [
-    { href: '#/', label: 'Úvod', icon: 'home' },
-    { href: '#/karta', label: 'Karta', icon: 'ticket' },
-    { href: '#/rezervace', label: 'Rezervace', icon: 'clock' },
+    { href: '#/', label: 'Domů', icon: 'home' },
     isLoggedIn()
-      ? { href: '#/profil', label: 'Profil', icon: 'user' }
+      ? { href: '#/karta', label: 'Karta', icon: 'qr' }
       : { href: '#/prihlaseni', label: 'Přihlásit', icon: 'key' },
+    { href: '#/rezervace', label: 'Rezervace', icon: 'clock' },
+    { href: '#/podminky', label: 'Podmínky', icon: 'file' },
   ];
-  if (isLoggedIn() && isStaff()) mobileItems.splice(4, 0, { href: '#/admin', label: 'Správa', icon: 'dashboard' });
-  if (isLoggedIn() && isDozor()) bottomnav.append(el('a', { href: '#/dozor', class: 'dozor-nav' + (isActive('#/dozor') ? ' active' : '') }, [
-    el('span', { class: 'ico' }, [ico('qr')]),
-    el('span', { text: 'Dozor' }),
-  ]));
-  if (isLoggedIn() && isSuperAdmin()) mobileItems.splice(4, 0, { href: '#/superadmin', label: 'Vlastník', icon: 'shield' });
+  // Dozor se musí trefit do spodní lišty (je to hlavní pracovní nástroj na place)
+  if (isLoggedIn() && isDozor()) mobileItems.splice(3, 0, { href: '#/dozor', label: 'Dozor', icon: 'qr' });
 
   for (const it of mobileItems) {
     bottomnav.append(el('a', { href: it.href, class: isActive(it.href) ? 'active' : '' }, [

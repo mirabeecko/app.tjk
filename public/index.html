@@ -17,13 +17,15 @@
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <!-- FONTY: vlastní (Inter + Outfit) — dřív se stylopis tahal z fonts.googleapis.com
-       a blokoval vykreslení (měřeno 554–637 ms). Preload jen nejdůležitějších
-       dvou souborů (nadpis + tělo textu); zbytek se dotáhne podle potřeby. -->
+  <!-- FONTY: vlastní (Outfit nadpisy, Plus Jakarta Sans text, JetBrains Mono labely
+       — design v3). Google Fonts jsou v CSP zakázané (font-src 'self'), proto
+       jsou soubory v /fonts. Preload jen nejdůležitějších dvou (nadpis + text). -->
   <link rel="preload" href="/fonts/outfit-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="preload" href="/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin />
-  <link rel="stylesheet" href="/css/fonts.css?v=46" />
-  <link rel="stylesheet" href="/css/app.css?v=46" />
+  <link rel="preload" href="/fonts/plusjakartasans-400-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/fonts.css?v=47" />
+  <link rel="stylesheet" href="/css/fonts-v3.css?v=47" />
+  <link rel="stylesheet" href="/css/app.css?v=47" />
+  <link rel="stylesheet" href="/css/theme-v3.css?v=47" />
 </head>
 <body>
   <!-- TRVALE VIDITELNÝ PRUH PŘIHLÁŠENÉHO PROFILU
@@ -57,13 +59,19 @@
         <a href="#/" class="brand top-brand">
           <img src="/img/tjk-logo.png" alt="TJ Krupka" class="brand-logo" />
           <span class="brand-text">
-            <strong>TJ Krupka</strong>
-            <small>členská aplikace</small>
+            <span class="brand-line">
+              <strong>TJ KRUPKA</strong>
+              <span class="role-pill" id="topbar-role" hidden></span>
+            </span>
+            <small id="topbar-sub">členská aplikace</small>
           </span>
         </a>
-        <button id="more-btn" class="more-btn" aria-label="Více" aria-expanded="false" aria-controls="mobile-menu">
-          <span></span><span></span><span></span>
-        </button>
+        <div class="topbar-right">
+          <a href="#/profil" class="topbar-avatar" id="topbar-avatar" aria-label="Můj profil" hidden></a>
+          <button id="more-btn" class="more-btn" aria-label="Více" aria-expanded="false" aria-controls="mobile-menu">
+            <span></span><span></span><span></span>
+          </button>
+        </div>
         <nav id="mobile-menu" class="mobile-menu" hidden></nav>
       </header>
 
@@ -82,15 +90,15 @@
   <nav class="bottomnav" id="bottomnav" hidden></nav>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="/js/api.js?v=46"></script>
-  <script src="/js/ui.js?v=46"></script>
-  <script src="/js/czech.js?v=46"></script>
-  <script src="/js/md.js?v=46"></script>
-  <script src="/js/views-public.js?v=46"></script>
-  <script src="/js/views-member.js?v=46"></script>
+  <script src="/js/api.js?v=47"></script>
+  <script src="/js/ui.js?v=47"></script>
+  <script src="/js/czech.js?v=47"></script>
+  <script src="/js/md.js?v=47"></script>
+  <script src="/js/views-public.js?v=47"></script>
+  <script src="/js/views-member.js?v=47"></script>
   <!-- views-admin.js (16 kB) a views-dozor.js se načítají LENIVĚ až když je
        účet opravdu potřebuje (správa / dozor / vlastník). Běžný návštěvník
        tak nestahuje kód, který nikdy nepoužije — viz načtiSkript() v app.js. -->
-  <script src="/js/app.js?v=46"></script>
+  <script src="/js/app.js?v=47"></script>
 </body>
 </html>
