@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const t=require('../src/airbag-session-rules');
+assert.equal(t.canOpenThird({paidFirst:7,paidSecond:7,interestThird:3}),'occupancy_interest');
+assert.equal(t.canOpenThird({paidFirst:1,paidSecond:2,interestThird:7}),'interest');
+assert.equal(t.canOpenThird({paidFirst:10,paidSecond:10,interestThird:0}),'sold_out');
+assert.equal(t.canOpenThird({paidFirst:4,paidSecond:4,interestThird:0}),null);
+assert.equal(t.canOpenThird({paidFirst:0,paidSecond:0,interestThird:0,manual:true}),'manual');
+assert.deepEqual(t.quoteOrder({riders:2,secondRiders:2}),{totalCzk:1096,savedCzk:300});
+assert.equal(t.confirmThird(4),false);assert.equal(t.confirmThird(5),true);
+assert.equal(t.availableCapacity(10,6,3),1);
+console.log('Airbag session rules: OK');
