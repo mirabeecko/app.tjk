@@ -192,7 +192,7 @@ async function viewLanding() {
     ]);
 
     // Pravidla a dokumenty k odsouhlasení se ukazují až po přihlášení (zadání 2026-10-29)
-    root.append(hero, marquee(), sekceTerminy(terminy), kroky, sekceVyhody);
+    root.append(hero, marquee(), sekceTerminy(terminy), kroky, sekceKde(), sekceVyhody);
     return;
   }
 
@@ -261,7 +261,58 @@ async function viewLanding() {
     el('div', { class: 'bento' }, cells),
   ]);
 
-  root.append(hero, marquee(), akce, sekceTerminy(terminy), sekceVyhody);
+  root.append(hero, marquee(), akce, sekceTerminy(terminy), sekceKde(), sekceVyhody);
+}
+
+/* ---------- KDE TO JE + VZDÁLENOSTI ----------
+   Jediná správná lokalita areálu je oficiální pin vlastníka:
+   https://maps.app.goo.gl/2F87JQkiWk76KtLo8  (50.703523,13.866286)
+   Všechny mapové odkazy v aplikaci míří SEM — needituj je na jiné souřadnice.
+   Kilometry = trasa autem z areálu do centra města (OSRM, zaokrouhleno). */
+const MAP_MISTO = 'https://maps.app.goo.gl/2F87JQkiWk76KtLo8';
+const MAP_SOURADNICE = '50.703523,13.866286';
+const MAP_NAVIGACE = 'https://www.google.com/maps/dir/?api=1&destination=' + MAP_SOURADNICE;
+const VZDALENOSTI = [
+  ['Teplice', 13],
+  ['Ústí nad Labem', 26],
+  ['Most', 39],
+  ['Litoměřice', 48],
+  ['Praha', 102],
+];
+
+/** Sekce „Kde to je": adresa areálu + klikatelná vzdálenost z okolních měst. */
+function sekceKde() {
+  const dlazdice = ([nazev, km]) => el('a', {
+    class: 'kde-tile',
+    href: MAP_NAVIGACE,
+    target: '_blank',
+    rel: 'noopener',
+    title: `Navigovat do areálu Komárka — ${nazev}, ${km} km`,
+    'aria-label': `Navigovat do areálu Komárka — ${nazev}, ${km} km`,
+  }, [
+    el('span', { class: 'kde-city', text: nazev }),
+    el('span', { class: 'kde-km' }, [`${km} km`]),
+    el('span', { class: 'kde-go' }, ['Navigovat', ico('navigation', 13)]),
+  ]);
+
+  return el('section', { class: 'sec', id: 'kde' }, [
+    secHead('pin', 'Kudy k nám', 'Kde to', 'je',
+      'Areál Komárka v Horní Krupce. Klepni na město a otevře se navigace přímo do areálu — v mobilu v Mapách Google, na počítači v prohlížeči.'),
+    el('div', { class: 'kde' }, [
+      el('div', { class: 'kde-card' }, [
+        el('span', { class: 'kde-ic' }, [ico('pin', 20)]),
+        el('div', { class: 'kde-txt' }, [
+          el('b', { text: 'Airbag Komárka' }),
+          el('span', { text: 'Horní Krupka 107, 417 41 Krupka' }),
+        ]),
+        el('a', { class: 'btn primary sm', href: MAP_MISTO, target: '_blank', rel: 'noopener' }, [
+          ico('navigation', 15), 'Otevřít v mapách',
+        ]),
+      ]),
+      el('div', { class: 'kde-grid' }, VZDALENOSTI.map(dlazdice)),
+      el('p', { class: 'kde-note', text: 'Kilometry jsou trasa autem do centra města. Parkuje se na parkovišti pod areálem, dál pěšky k matraci.' }),
+    ]),
+  ]);
 }
 
 /* ---------- PRAVIDLA PROVOZU (základní pravidla) ---------- */

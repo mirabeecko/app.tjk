@@ -7,8 +7,8 @@
  * až ve chvíli, kdy na takovou stránku uživatel skutečně jde — běžný návštěvník
  * tak nestahuje ~50 kB JS, který nikdy nepoužije.
  * ----------------------------------------------------------------------- */
-const SKRIPT_ADMIN = '/js/views-admin.js?v=56';
-const SKRIPT_DOZOR = '/js/views-dozor.js?v=56';
+const SKRIPT_ADMIN = '/js/views-admin.js?v=57';
+const SKRIPT_DOZOR = '/js/views-dozor.js?v=57';
 const _nactene = {};
 function nactiSkript(src) {
   if (_nactene[src]) return _nactene[src];
@@ -112,6 +112,21 @@ async function refreshNotifBadge() {
   });
 }
 
+/* ---------- ODHLÁŠENÍ ----------
+   Tlačítko je na DVOU místech, aby ho přihlášený uživatel vždy našel:
+   1) v hlavičce vpravo vedle notifikací (vidí ho na každé obrazovce, i na mobilu),
+   2) v panelu „Více" jako plnohodnotnou položku s textem.
+   Profil má vlastní tlačítko ve spodní části stránky — to zůstává. */
+async function odhlasitSe() {
+  try { await API.post('/logout'); } catch (e) { /* i tak se odhlásíme lokálně */ }
+  me = null;
+  try { closeMenu(); } catch (e) { /* noop */ }
+  toast('Odhlášeno');
+  location.hash = '#/';
+  renderNav();
+  render();
+}
+
 function renderNav() {
   const hash = location.hash || '#/';
   const topnav = $('#topnav');
@@ -193,6 +208,9 @@ function renderNav() {
         el('a', { class: 'icon-btn', href: '#/notifikace', 'aria-label': 'Notifikace', title: 'Notifikace' }, [
           ico('bell', 18), el('span', { class: 'notif-badge', style: 'display:none' }),
         ]),
+        el('button', { type: 'button', class: 'top-logout', title: 'Odhlásit se', 'aria-label': 'Odhlásit se', onclick: () => odhlasitSe() }, [
+          ico('logout', 17), el('span', { class: 'top-logout-l', text: 'Odhlásit' }),
+        ]),
         el('a', { class: 'btn primary sm top-cta', href: '#/platba' }, [ico('ticket', 16), el('span', { text: 'Koupit vstup' })]),
       );
     } else {
@@ -238,6 +256,12 @@ function renderNav() {
         grid.append(a);
       }
       mobileMenu.append(grid);
+    }
+    // odhlášení jako plnohodnotná položka na konci panelu „Více"
+    if (logged) {
+      mobileMenu.append(el('button', { type: 'button', class: 'mm-logout', onclick: () => odhlasitSe() }, [
+        ico('logout', 17), el('span', { text: 'Odhlásit se' }),
+      ]));
     }
   }
 
