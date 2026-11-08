@@ -476,10 +476,40 @@ async function viewRegister() {
   const root = $('#view');
   root.innerHTML = '';
 
-  // Záměr z úvodu (členství × jednorázový vstup) — přepínač nahoře, jde změnit i tady
+  // Záměr z úvodu (členství × jednorázový vstup) — přepínač nahoře, jde změnit i tady.
+  // Odkaz z webu airbagu nese ?intent=clenstvi|vstup PŘED hash (např.
+  // https://app.tjkrupka.cz/?intent=vstup#/registrace) — proto location.search.
   let intent = 'clenstvi';
+  const urlIntent = new URLSearchParams(location.search).get('intent');
+  if (urlIntent === 'vstup' || urlIntent === 'clenstvi') {
+    try { sessionStorage.setItem('tj_intent', urlIntent); } catch (e) { /* noop */ }
+  }
   try { intent = sessionStorage.getItem('tj_intent') || 'clenstvi'; } catch (e) { /* noop */ }
   let dailyIntent = intent === 'vstup';
+
+  // Nadpis i nabídka se MĚNÍ podle rozhodnutí (členství × jednorázový vstup) —
+  // stránka po kliknutí z webu nesmí vypadat stejně pro oba případy.
+  const h1Intent = el('h1');
+  const leadIntent = el('p', { class: 'muted' });
+  const upsell = el('div', { class: 'card soft', id: 'upsell' });
+  const upsellBtn = el('button', { type: 'button', class: 'btn primary small', text: 'Chci raději členství' });
+  upsell.append(
+    el('h3', { text: 'Ušetři 300 Kč hned na prvním vstupu' }),
+    el('p', { class: 'muted small', text: 'Jednorázový vstup stojí 600 Kč. Členství TJ Krupka je 200 Kč na rok a vstup pak vyjde na 300 Kč — rozdíl máš zpátky po prvním skákání.' }),
+    upsellBtn,
+  );
+
+  function updateIntentUI() {
+    if (dailyIntent) {
+      h1Intent.textContent = 'Jednorázový vstup';
+      leadIntent.textContent = 'Bez členství: 600 Kč na den. Registrace, souhlasy a platba — pak máš v mobilu QR kartu pro vstup.';
+      upsell.hidden = false;
+    } else {
+      h1Intent.textContent = 'Členství TJ Krupka';
+      leadIntent.textContent = 'Členství 200 Kč na rok a vstup pak za 300 Kč místo 600 Kč. Registrace zabere dvě minuty.';
+      upsell.hidden = true;
+    }
+  }
 
   const seg = el('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Co chcete' });
   const segOpt = (val, title, sub) => {
@@ -490,6 +520,7 @@ async function viewRegister() {
       dailyIntent = val === 'vstup';
       try { sessionStorage.setItem('tj_intent', val); } catch (e) { /* noop */ }
       $$('.seg-opt', seg).forEach((x) => x.classList.toggle('on', x === b));
+      updateIntentUI();
     });
     return b;
   };
@@ -538,12 +569,19 @@ async function viewRegister() {
     el('p', { class: 'auth-switch' }, ['Už máš účet? ', el('a', { href: '#/prihlaseni', text: 'Přihlásit se' })]),
   ]);
 
+  upsellBtn.addEventListener('click', () => {
+    const first = $$('.seg-opt', seg)[0];
+    if (first) first.click();
+  });
+
   root.append(
-    el('h1', { text: 'Registrace' }),
-    el('p', { class: 'muted', text: 'Tři rychlé kroky: údaje, souhlasy, platba. Pak máš v mobilu QR kartu pro vstup.' }),
+    h1Intent,
+    leadIntent,
     regSteps(0),
+    upsell,
     form,
   );
+  updateIntentUI();
 
   const categoryBox = $('#age-category');
   const guardianCard = $('#guardian-card');
@@ -685,7 +723,7 @@ async function viewLogin() {
 
   const form = el('form', { id: 'login-form' }, [
     el('label', { text: 'E-mail' }),
-    el('input', { type: 'email', name: 'email', required: true, autocomplete: 'email', placeholder: 'vas@email.cz' }),
+    el('input', { type: 'email', name: 'email', required: true, autocomplete: 'email', placeholder: 'vas@email.cz', value: new URLSearchParams(location.search).get('email') || '' }),
     el('label', { text: 'Heslo' }),
     el('input', { type: 'password', name: 'password', required: true, autocomplete: 'current-password', placeholder: '••••••••' }),
     el('button', { class: 'btn', type: 'submit', text: 'Přihlásit se' }),

@@ -983,3 +983,6 @@ details.doklad > .card { background: transparent !important; border: 0 !importan
   .kde-grid { grid-template-columns: repeat(2, 1fr); }
   .kde-card .btn { width: 100%; justify-content: center; }
 }
+
+/* skrytí atributem hidden musí vyhrát nad display z komponent */
+[hidden] { display: none !important; }
