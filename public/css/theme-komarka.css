@@ -987,3 +987,15 @@ details.doklad > .card { background: transparent !important; border: 0 !importan
 /* skrytí atributem hidden musí vyhrát nad display z komponent */
 [hidden] { display: none !important; }
 .kde-cas { font-size: 11.5px; color: var(--dim2); margin-top: -3px; }
+
+/* ---- focení fotky na kartu: webkamera na notebooku ---- */
+.cam-modal { position: fixed; inset: 0; z-index: 130; display: flex; align-items: center; justify-content: center;
+  padding: 18px; background: rgba(4, 7, 12, .84); }
+.cam-box { width: min(460px, 100%); padding: 18px; text-align: center; border-radius: 22px;
+  background: #0E1521; border: 1px solid rgba(200, 255, 61, .28);
+  box-shadow: 0 40px 90px -40px rgba(0, 0, 0, .9); }
+.cam-box h3 { font-family: var(--disp); font-size: 19px; margin-bottom: 12px; }
+.cam-video { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 14px;
+  background: #05080E; transform: scaleX(-1); }
+.cam-stav { margin: 10px 0 12px; font-size: 12.5px; color: var(--dim2); }
+.cam-acts { display: flex; gap: 8px; justify-content: center; }

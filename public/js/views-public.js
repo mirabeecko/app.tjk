@@ -192,7 +192,7 @@ async function viewLanding() {
     ]);
 
     // Pravidla a dokumenty k odsouhlasení se ukazují až po přihlášení (zadání 2026-10-29)
-    root.append(hero, marquee(), sekceTerminy(terminy), kroky, sekceKde(), sekceVyhody);
+    root.append(hero, marquee(), sekceTerminy(terminy), kroky, sekceKurzy(), sekceKde(), sekceVyhody);
     return;
   }
 
@@ -261,7 +261,53 @@ async function viewLanding() {
     el('div', { class: 'bento' }, cells),
   ]);
 
-  root.append(hero, marquee(), akce, sekceTerminy(terminy), sekceKde(), sekceVyhody);
+  root.append(hero, marquee(), akce, sekceTerminy(terminy), sekceKurzy(), sekceKde(), sekceVyhody);
+}
+
+/* ---------- SNOWKITE KURZY ----------
+   Škola Komárka Kite (snowkiting.vercel.app) jezdí ve stejném areálu.
+   Ceny a rozsah jsou z jejího katalogu (komarka-kite/src/lib/catalog.ts) —
+   když se tam cena změní, oprav ji i tady. */
+const KITE_WEB = 'https://snowkiting.vercel.app/';
+const KURZY = [
+  {
+    nazev: 'Rodinná ochutnávka',
+    cena: '1 990 Kč',
+    cas: '2 hodiny',
+    pozn: '2 dospělí + dítě od 7 let',
+    text: 'Dvě hodiny na sněhu: jak fouká vítr, bezpečnost, cvičný drak v ruce a ukázková jízda instruktora.',
+  },
+  {
+    nazev: 'První jízda',
+    cena: '3 490 Kč',
+    cas: '1 den · cca 5 h',
+    pozn: 'od 14 let, základy lyží',
+    text: 'Ráno teorie, odpoledne první metry po sněhu za drakem. Vybavení Flysurfer je v ceně.',
+  },
+  {
+    nazev: 'Samostatný jezdec',
+    cena: '5 990 Kč',
+    cas: '2 dny',
+    pozn: 'po kurzu První jízda',
+    text: 'Jízda oběma směry, proti větru, samostatný start a přistání. Pak už jezdíš sám.',
+  },
+];
+
+/** Kurzy snowkitu — vedle airbagu, protože jezdí ve stejném areálu. */
+function sekceKurzy() {
+  return el('section', { class: 'sec', id: 'kurzy' }, [
+    secHead('wind', 'Snowkite kurzy', 'Zima patří', 'kitu',
+      'Když je na kopci sníh, jezdí se na snowkitu. Škola Komárka Kite učí přímo v areálu — s vlastním vybavením Flysurfer.'),
+    el('div', { class: 'disc' }, KURZY.map((k) => el('div', { class: 'dcard' }, [
+      el('div', { class: 'top-line' }, [ico('wind', 20), el('h3', { text: k.nazev })]),
+      el('p', { text: k.text }),
+      el('div', { class: 'req' }, [el('b', { text: k.cena }), ` · ${k.cas} · ${k.pozn}`]),
+    ])).concat([el('div', { class: 'dcard' }, [
+      el('div', { class: 'top-line' }, [ico('external', 20), el('h3', { text: 'Termíny a rezervace' })]),
+      el('p', { text: 'Kurzy se objednávají na webu školy — vybereš kurz, datum a počet osob.' }),
+      el('a', { class: 'btn sm', href: KITE_WEB, target: '_blank', rel: 'noopener' }, ['Otevřít snowkiting.vercel.app', ico('arrow', 15)]),
+    ])])),
+  ]);
 }
 
 /* ---------- KDE TO JE + VZDÁLENOSTI ----------
@@ -550,10 +596,13 @@ async function viewRegister() {
     el('div', { class: 'flow-sec' }, [el('span', { class: 'flow-n', text: '3' }), el('h3', { text: 'Fotka na kartu' })]),
     el('div', { class: 'photo-upload' }, [
       el('input', { type: 'file', id: 'reg-photo', name: 'photoFile', accept: 'image/*', style: 'display:none' }),
+      // Druhý input s capture otevírá na telefonu ROVNOU fotoaparát (na notebooku kameru).
+      el('input', { type: 'file', id: 'reg-photo-cam', accept: 'image/*', capture: 'environment', style: 'display:none' }),
       el('div', { id: 'reg-photo-preview', class: 'photo-preview', text: 'Bez fotky', onclick: () => $('#reg-photo').click() }),
       el('div', {}, [
-        el('button', { type: 'button', class: 'btn small', text: 'Vybrat fotku', onclick: () => $('#reg-photo').click() }),
-        el('p', { class: 'muted small', text: 'Portrét, podle kterého tě dozor pozná. Zmenšíme ji automaticky.' }),
+        el('button', { type: 'button', class: 'btn small', text: 'Vyfotit', onclick: () => spustFotak() }),
+        el('button', { type: 'button', class: 'btn small ghost', text: 'Vložit fotku', onclick: () => $('#reg-photo').click() }),
+        el('p', { class: 'muted small', text: 'Vyfoť se mobilem nebo vlož fotku z disku. Portrét, podle kterého tě dozor pozná — zmenšíme ji automaticky.' }),
       ]),
     ]),
     el('div', { id: 'guardian-card', class: 'guardian-box', hidden: true }, [
@@ -618,26 +667,106 @@ async function viewRegister() {
 
 
   const photoInput = $('#reg-photo');
+  const photoCamInput = $('#reg-photo-cam');
   const photoPreview = $('#reg-photo-preview');
-  if (photoInput && photoPreview) {
-    photoInput.addEventListener('change', async (ev) => {
+
+  // Jedno místo, kam dorazí fotka z foťáku, z galerie i z webkamery.
+  const zpracujFotku = async (file) => {
+    if (!file || !photoPreview) return;
+    if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.type)) {
+      toast('Vyberte obrázek (JPG/PNG/WebP)', true);
+      return;
+    }
+    try {
+      photoData = await zmensiFotku(file);
+      photoPreview.style.backgroundImage = `url(${photoData})`;
+      photoPreview.classList.add('has-photo');
+      photoPreview.textContent = '';
+    } catch (err) {
+      photoData = '';
+      photoPreview.style.backgroundImage = '';
+      photoPreview.classList.remove('has-photo');
+      toast(err.message, true);
+    }
+  };
+
+  [photoInput, photoCamInput].forEach((inp) => {
+    if (!inp) return;
+    inp.addEventListener('change', (ev) => {
       const file = (ev.target.files || [])[0];
-      if (!file) return;
-      if (!/^image\/(jpeg|jpg|png|webp)$/.test(file.type)) {
-        toast('Vyberte obrázek (JPG/PNG/WebP)', true);
+      // value se musí vynulovat, jinak druhá volba stejného souboru nespustí change
+      ev.target.value = '';
+      if (file) zpracujFotku(file);
+    });
+  });
+
+  /* „Vyfotit": na telefonu otevře nativní foťák (input s capture), na notebooku
+     webkou kameru přes getUserMedia — prohlížeče na desktopu capture ignorují.
+     Když kamera nejde (chybí, nepovolená), padáme zpět na výběr souboru. */
+  function spustFotak() {
+    const dotyk = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    if (dotyk || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (photoCamInput) photoCamInput.click();
+      return;
+    }
+
+    const video = el('video', { class: 'cam-video', autoplay: '', playsinline: '', muted: '' });
+    const stav = el('p', { class: 'cam-stav', text: 'Povol přístup ke kameře…' });
+    const btnFoto = el('button', { type: 'button', class: 'btn primary', text: 'Vyfotit' });
+    const btnZavrit = el('button', { type: 'button', class: 'btn ghost', text: 'Zavřít' });
+    const modal = el('div', { class: 'cam-modal' }, [
+      el('div', { class: 'cam-box' }, [
+        el('h3', { text: 'Fotka na kartu' }),
+        video,
+        stav,
+        el('div', { class: 'cam-acts' }, [btnFoto, btnZavrit]),
+      ]),
+    ]);
+    document.body.append(modal);
+
+    let stream = null;
+    const zavri = () => {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      modal.remove();
+    };
+    btnZavrit.addEventListener('click', zavri);
+
+    btnFoto.addEventListener('click', () => {
+      const w = video.videoWidth;
+      const h = video.videoHeight;
+      if (!w || !h) {
+        toast('Kamera ještě neběží — zkus to za chvíli', true);
         return;
       }
-      try {
-        photoData = await zmensiFotku(file);
-        photoPreview.style.backgroundImage = `url(${photoData})`;
-        photoPreview.classList.add('has-photo');
-        photoPreview.textContent = '';
-      } catch (err) {
-        photoData = '';
-        photoPreview.style.backgroundImage = '';
-        photoPreview.classList.remove('has-photo');
-        toast(err.message, true);
-      }
+      // čtvercový výřez na střed: karta i náhled jsou na výšku
+      const s = Math.min(w, h);
+      const cv = document.createElement('canvas');
+      cv.width = 720;
+      cv.height = 720;
+      cv.getContext('2d').drawImage(video, (w - s) / 2, (h - s) / 2, s, s, 0, 0, 720, 720);
+      cv.toBlob((blob) => {
+        if (!blob) {
+          toast('Fotku se nepodařilo uložit', true);
+          return;
+        }
+        const soubor = new File([blob], 'foto.jpg', { type: 'image/jpeg' });
+        zavri();
+        zpracujFotku(soubor);
+      }, 'image/jpeg', 0.9);
+    });
+
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 } }, audio: false })
+      .then((s) => {
+        stream = s;
+        video.srcObject = s;
+        stav.textContent = 'Namíř se do středu a zmáčkni Vyfotit.';
+      })
+      .catch(() => {
+        stav.textContent = 'Kameru prohlížeč nepustil — použij „Vložit fotku".';
+      });
+    modal.addEventListener('click', (ev) => {
+      if (ev.target === modal) zavri();
     });
   }
 
