@@ -273,25 +273,26 @@ const MAP_MISTO = 'https://maps.app.goo.gl/2F87JQkiWk76KtLo8';
 const MAP_SOURADNICE = '50.703523,13.866286';
 const MAP_NAVIGACE = 'https://www.google.com/maps/dir/?api=1&destination=' + MAP_SOURADNICE;
 const VZDALENOSTI = [
-  ['Teplice', 13],
-  ['Ústí nad Labem', 26],
-  ['Most', 39],
-  ['Litoměřice', 48],
-  ['Praha', 102],
+  ['Teplice', 13, 20],
+  ['Ústí nad Labem', 26, 30],
+  ['Most', 39, 45],
+  ['Litoměřice', 48, 50],
+  ['Praha', 102, 85],
 ];
 
 /** Sekce „Kde to je": adresa areálu + klikatelná vzdálenost z okolních měst. */
 function sekceKde() {
-  const dlazdice = ([nazev, km]) => el('a', {
+  const dlazdice = ([nazev, km, min]) => el('a', {
     class: 'kde-tile',
     href: MAP_NAVIGACE,
     target: '_blank',
     rel: 'noopener',
-    title: `Navigovat do areálu Komárka — ${nazev}, ${km} km`,
-    'aria-label': `Navigovat do areálu Komárka — ${nazev}, ${km} km`,
+    title: `Navigovat do areálu Komárka — ${nazev}, ${km} km, ${min} min autem`,
+    'aria-label': `Navigovat do areálu Komárka — ${nazev}, ${km} km, ${min} min autem`,
   }, [
     el('span', { class: 'kde-city', text: nazev }),
     el('span', { class: 'kde-km' }, [`${km} km`]),
+    el('span', { class: 'kde-cas', text: `${min} min autem` }),
     el('span', { class: 'kde-go' }, ['Navigovat', ico('navigation', 13)]),
   ]);
 

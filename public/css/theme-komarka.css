@@ -986,3 +986,4 @@ details.doklad > .card { background: transparent !important; border: 0 !importan
 
 /* skrytí atributem hidden musí vyhrát nad display z komponent */
 [hidden] { display: none !important; }
+.kde-cas { font-size: 11.5px; color: var(--dim2); margin-top: -3px; }
